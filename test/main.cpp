@@ -48,6 +48,7 @@
 #include "tests/containers/TestDeque.h"
 #include "tests/containers/TestStack.h"
 #include "tests/engine/TestRigidBody.h"
+#include "tests/constraint/TestAxisConstraintPart.h"
 #include "tests/systems/TestDynamicSystem.h"
 #include "tests/utils/TestQuickHull.h"
 
@@ -96,6 +97,10 @@ int main() {
 
     testSuite.addTest(new TestRigidBody("RigidBody"));
     testSuite.addTest(new TestDynamicSystem("Motion Integration"));
+
+    // ---------- Constraint tests ---------- //
+
+    testSuite.addTest(new TestAxisConstraintPart("AxisConstraintPart"));
 
     // Run the tests
     testSuite.run();

@@ -101,6 +101,8 @@ if(RP3D_COMPILE_LIBRARY)
 	    "include/reactphysics3d/constraint/HingeJoint.h"
 	    "include/reactphysics3d/constraint/Joint.h"
 	    "include/reactphysics3d/constraint/SliderJoint.h"
+	    "include/reactphysics3d/constraint/SpringSettings.h"
+	    "include/reactphysics3d/constraint/AxisConstraintPart.h"
 	    "include/reactphysics3d/engine/Entity.h"
 	    "include/reactphysics3d/engine/EntityManager.h"
 	    "include/reactphysics3d/engine/PhysicsCommon.h"
