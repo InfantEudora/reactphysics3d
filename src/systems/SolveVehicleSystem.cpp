@@ -73,6 +73,12 @@ class WheelRaycastCallback : public RaycastCallback {
         }
 };
 
+// Rotation of `angle` radians about the unit vector `axis`
+Quaternion rotationAboutAxis(const Vector3& axis, decimal angle) {
+    const decimal halfAngle = decimal(0.5) * angle;
+    return Quaternion(axis * std::sin(halfAngle), std::cos(halfAngle));
+}
+
 }
 
 // Constructor
@@ -163,12 +169,36 @@ void SolveVehicleSystem::initWheel(VehicleConstraint& vehicle, VehicleWheel& whe
     const VehicleWheelSettings& settings = wheel.mSettings;
     const uint32 bodyIndex = vehicle.mBodyComponentIndex;
 
-    // Spin the wheel: angular damping dw/dt = -c w integrated as w *= (1 - c dt), then the angle.
-    // Contact or not, the wheel keeps turning; the longitudinal friction below is what couples it
-    // to the ground.
+    // ---------- Spin the wheel ---------- //
+
+    // Angular damping dw/dt = -c w, integrated as w *= (1 - c dt)
     wheel.mAngularVelocity *= std::max(decimal(0.0), decimal(1.0) - settings.angularDamping * mTimeStep);
+
+    // The drive torque spins the wheel up; the tire then turns that spin into a push on the
+    // road (or into wheelspin, if the tire cannot hold it)
+    wheel.mAngularVelocity += wheel.mDriveTorque / settings.inertia * mTimeStep;
+
+    // The brake slows the wheel towards a standstill, never past it. What it can transmit to the
+    // road this step is the brake torque as an impulse at the tread.
+    if (wheel.mBrakeTorque > decimal(0.0)) {
+        const decimal brakeDeltaW = wheel.mBrakeTorque / settings.inertia * mTimeStep;
+        if (std::abs(wheel.mAngularVelocity) <= brakeDeltaW) {
+            wheel.mAngularVelocity = decimal(0.0);
+        }
+        else {
+            wheel.mAngularVelocity -= (wheel.mAngularVelocity > decimal(0.0) ? brakeDeltaW : -brakeDeltaW);
+        }
+        wheel.mBrakeImpulse = wheel.mBrakeTorque * mTimeStep / settings.radius;
+    }
+    else {
+        wheel.mBrakeImpulse = decimal(0.0);
+    }
+
+    // Contact or not, the wheel keeps turning
     wheel.mRotationAngle = std::fmod(wheel.mRotationAngle + wheel.mAngularVelocity * mTimeStep, decimal(2.0) * PI_RP3D);
     if (wheel.mRotationAngle < decimal(0.0)) wheel.mRotationAngle += decimal(2.0) * PI_RP3D;
+
+    // ---------- Find the ground ---------- //
 
     // Suspension ray: from the attachment point, along the suspension direction, as far as the
     // wheel can droop plus its radius (the tread touches down before the hub gets there)
@@ -206,11 +236,17 @@ void SolveVehicleSystem::initWheel(VehicleConstraint& vehicle, VehicleWheel& whe
     // The axle may never go below the plane through its current position (see the hard stop)
     wheel.mAxlePlaneConstant = wheel.mContactNormal.dot(anchorWorld + directionWorld * wheel.mSuspensionLength);
 
-    // Tire basis in the contact plane: the rolling direction is the wheel forward direction
-    // projected into the plane (built as normal x right so it stays perpendicular to the normal),
-    // the lateral direction completes the frame, pointing to the right of the wheel
-    const Vector3 forwardWorld = bodyTransform.getOrientation() * settings.wheelForward;
-    const Vector3 rightWorld = bodyTransform.getOrientation() * settings.wheelUp.cross(settings.wheelForward);
+    // ---------- Tire basis ---------- //
+
+    // Steer the wheel forward and up directions about the steering axis, then build the frame in
+    // the contact plane: the rolling direction is normal x right (so it stays perpendicular to the
+    // normal), flipped towards the wheel forward direction; the lateral direction completes it,
+    // pointing to the right of the wheel
+    const Quaternion steer = rotationAboutAxis(settings.steeringAxis.getUnit(), wheel.mSteerAngle);
+    const Vector3 forwardLocal = steer * settings.wheelForward;
+    const Vector3 upLocal = steer * settings.wheelUp;
+    const Vector3 forwardWorld = bodyTransform.getOrientation() * forwardLocal;
+    const Vector3 rightWorld = bodyTransform.getOrientation() * forwardLocal.cross(upLocal);
     Vector3 longitudinal = wheel.mContactNormal.cross(rightWorld);
     if (longitudinal.dot(forwardWorld) < decimal(0.0)) longitudinal = -longitudinal;
     if (longitudinal.lengthSquare() > MACHINE_EPSILON) {
@@ -220,7 +256,7 @@ void SolveVehicleSystem::initWheel(VehicleConstraint& vehicle, VehicleWheel& whe
         longitudinal = wheel.mContactNormal.getOneUnitOrthogonalVector();
     }
     wheel.mContactLongitudinal = longitudinal;
-    wheel.mContactLateral = wheel.mContactNormal.cross(longitudinal).getUnit();
+    wheel.mContactLateral = longitudinal.cross(wheel.mContactNormal).getUnit();
 
     // Where the tire forces act: at the contact point, or at a fixed point on the chassis
     const Vector3 forcePointWorld = settings.enableSuspensionForcePoint ? bodyTransform * settings.suspensionForcePoint : wheel.mContactPoint;
@@ -336,9 +372,9 @@ void SolveVehicleSystem::warmstart() {
             wheel.mLateralPart.warmStart(ground, chassis, wheel.mContactLateral);
 
             // The longitudinal impulse is NOT warm started: it is recomputed every step from the
-            // difference between wheel spin and ground speed (and later the drive/brake torque),
-            // and the spin of the wheel already carries the effect of last step's impulse.
-            // Re-applying it would count it twice and act as a brake.
+            // difference between wheel spin and ground speed (or from the brake), and the spin of
+            // the wheel already carries the effect of last step's impulse. Re-applying it would
+            // count it twice and act as a brake.
             wheel.mLongitudinalPart.resetTotalLambda();
         }
     }
@@ -394,24 +430,46 @@ void SolveVehicleSystem::solveLongitudinalFriction(VehicleConstraint& vehicle, c
         const AxisConstraintBody ground = makeGroundBody(wheel);
 
         // The most the tire can transmit this step, from the normal impulse so far
-        const decimal maxImpulse = settings.longitudinalFriction * wheel.getNormalImpulse();
+        const decimal maxFrictionImpulse = settings.longitudinalFriction * wheel.getNormalImpulse();
 
         // Velocity of the chassis at the tire relative to the ground, along the rolling direction
         const Vector3 chassisPointVelocity = *chassis.linearVelocity + chassis.angularVelocity->cross(wheel.mR2);
         const Vector3 groundPointVelocity = *ground.linearVelocity + ground.angularVelocity->cross(wheel.mR1);
         const decimal relativeVelocity = wheel.mContactLongitudinal.dot(chassisPointVelocity - groundPointVelocity);
 
-        // A free wheel rolls without slipping: apply the impulse that brings the surface speed of
-        // the wheel to the ground speed in one step, limited by friction. The wheel spins up (or
-        // down) by whatever impulse was actually applied, so a wheel that is friction-limited
-        // keeps slipping instead of snapping to the ground speed.
-        const decimal desiredAngularVelocity = relativeVelocity / settings.radius;
-        const decimal impulseToMatch = (wheel.mAngularVelocity - desiredAngularVelocity) * settings.inertia / settings.radius;
-        const decimal previousImpulse = wheel.mLongitudinalPart.getTotalLambda();
-        const decimal targetImpulse = clamp(previousImpulse + impulseToMatch, -maxImpulse, maxImpulse);
-        wheel.mLongitudinalPart.solveVelocityConstraint(ground, chassis, wheel.mContactLongitudinal, targetImpulse, targetImpulse);
+        if (wheel.mBrakeImpulse > decimal(0.0)) {
 
-        wheel.mAngularVelocity -= (wheel.mLongitudinalPart.getTotalLambda() - previousImpulse) * settings.radius / settings.inertia;
+            // Braking: stop the tread relative to the road, up to what the brake and the tire can
+            // transmit, and never so much that the vehicle would be pushed the other way. The
+            // wheel itself is slowed by the brake in initWheel(); a strong enough brake locks it
+            // and the tire then slides at its friction limit.
+            const decimal maxImpulse = std::min(wheel.mBrakeImpulse, maxFrictionImpulse);
+            decimal minLambda, maxLambda;
+            if (relativeVelocity >= decimal(0.0)) {
+                minLambda = -maxImpulse;
+                maxLambda = decimal(0.0);
+            }
+            else {
+                minLambda = decimal(0.0);
+                maxLambda = maxImpulse;
+            }
+            wheel.mLongitudinalPart.solveVelocityConstraint(ground, chassis, wheel.mContactLongitudinal, minLambda, maxLambda);
+        }
+        else {
+
+            // Rolling: apply the impulse that brings the surface speed of the wheel to the ground
+            // speed in one step, limited by friction. The wheel spins up (or down) by whatever
+            // impulse was actually applied, so a driven wheel pushes the vehicle forward through
+            // this coupling and a friction-limited one keeps slipping (wheelspin) instead of
+            // snapping to the ground speed.
+            const decimal desiredAngularVelocity = relativeVelocity / settings.radius;
+            const decimal impulseToMatch = (wheel.mAngularVelocity - desiredAngularVelocity) * settings.inertia / settings.radius;
+            const decimal previousImpulse = wheel.mLongitudinalPart.getTotalLambda();
+            const decimal targetImpulse = clamp(previousImpulse + impulseToMatch, -maxFrictionImpulse, maxFrictionImpulse);
+            wheel.mLongitudinalPart.solveVelocityConstraint(ground, chassis, wheel.mContactLongitudinal, targetImpulse, targetImpulse);
+
+            wheel.mAngularVelocity -= (wheel.mLongitudinalPart.getTotalLambda() - previousImpulse) * settings.radius / settings.inertia;
+        }
     }
 }
 

@@ -43,8 +43,11 @@ class MemoryAllocator;
 // Structure VehicleWheelSettings
 /**
  * Describes one wheel of a VehicleConstraint: where its suspension attaches to the chassis,
- * which way it travels, how long it is, how it springs, and how its tire grips. All positions
- * and directions are in the local space of the chassis body.
+ * which way it travels, how long it is, how it springs, how it steers and how its tire grips.
+ * All positions and directions are in the local space of the chassis body.
+ *
+ * Directions: with the defaults (forward +z, up +y) the right side of the vehicle is -x, as in
+ * any right-handed frame: right = forward x up.
  */
 struct VehicleWheelSettings {
 
@@ -58,12 +61,18 @@ struct VehicleWheelSettings {
         /// Direction the suspension extends in (points down for a normal car)
         Vector3 suspensionDirection;
 
+        /// Axis the wheel steers about (points up for a normal car)
+        Vector3 steeringAxis;
+
         /// Forward direction of the wheel when not steered (usually the vehicle forward direction).
         /// Together with wheelUp it defines the rolling direction of the tire.
         Vector3 wheelForward;
 
         /// Up direction of the wheel when not steered (usually the vehicle up direction)
         Vector3 wheelUp;
+
+        /// Largest steer angle (rad) VehicleWheel::setSteerAngle() accepts, either way
+        decimal maxSteerAngle;
 
         /// Suspension length at full compression (m), measured from position along suspensionDirection.
         /// Below this a hard stop takes over from the spring.
@@ -115,7 +124,8 @@ struct VehicleWheelSettings {
 
         /// Constructor
         VehicleWheelSettings()
-            : position(0, 0, 0), suspensionDirection(0, -1, 0), wheelForward(0, 0, 1), wheelUp(0, 1, 0),
+            : position(0, 0, 0), suspensionDirection(0, -1, 0), steeringAxis(0, 1, 0), wheelForward(0, 0, 1), wheelUp(0, 1, 0),
+              maxSteerAngle(decimal(70.0) * PI_RP3D / decimal(180.0)),
               suspensionMinLength(decimal(0.3)), suspensionMaxLength(decimal(0.5)), suspensionPreloadLength(decimal(0.0)),
               suspensionSpring(SpringSettings::fromFrequencyAndDampingRatio(decimal(1.5), decimal(0.5))),
               radius(decimal(0.3)), width(decimal(0.1)), inertia(decimal(0.9)), angularDamping(decimal(0.2)),
@@ -125,8 +135,9 @@ struct VehicleWheelSettings {
 
 // Class VehicleWheel
 /**
- * Runtime state of one wheel of a VehicleConstraint: its settings plus what the solver found
- * this step (ground contact, suspension length, impulses) and the spin of the wheel.
+ * Runtime state of one wheel of a VehicleConstraint: its settings, the driver inputs that act
+ * on it (steer angle, drive torque, brake torque), what the solver found this step (ground
+ * contact, suspension length, impulses) and the spin of the wheel.
  */
 class VehicleWheel {
 
@@ -136,6 +147,18 @@ class VehicleWheel {
 
         /// Settings of the wheel (may be changed at any time)
         VehicleWheelSettings mSettings;
+
+        /// Steer angle (rad) about the steering axis, positive turns the wheel to the left
+        decimal mSteerAngle;
+
+        /// Torque (N.m) driving the wheel, positive rolls the vehicle forward
+        decimal mDriveTorque;
+
+        /// Torque (N.m, >= 0) the brake applies against the rotation of the wheel
+        decimal mBrakeTorque;
+
+        /// Impulse (N.s) the brake can transmit to the ground this step: brake torque * dt / radius
+        decimal mBrakeImpulse;
 
         /// Body the wheel is touching (nullptr if in the air)
         RigidBody* mContactBody;
@@ -202,6 +225,25 @@ class VehicleWheel {
         /// Return the settings of the wheel (writable, changes apply from the next step)
         VehicleWheelSettings& getSettings();
 
+        /// Return the steer angle (rad), positive to the left
+        decimal getSteerAngle() const;
+
+        /// Set the steer angle (rad) about the steering axis, positive to the left. Clamped to
+        /// +/- VehicleWheelSettings::maxSteerAngle.
+        void setSteerAngle(decimal angle);
+
+        /// Return the drive torque (N.m) on the wheel
+        decimal getDriveTorque() const;
+
+        /// Set the torque (N.m) driving the wheel, positive rolls the vehicle forward. Stays until changed.
+        void setDriveTorque(decimal torque);
+
+        /// Return the brake torque (N.m) on the wheel
+        decimal getBrakeTorque() const;
+
+        /// Set the torque (N.m, >= 0) the brake applies against the rotation of the wheel. Stays until changed.
+        void setBrakeTorque(decimal torque);
+
         /// Return true if the wheel is touching something
         bool hasContact() const;
 
@@ -217,7 +259,7 @@ class VehicleWheel {
         /// Return the rolling direction of the tire in world space (only meaningful if hasContact())
         const Vector3& getContactLongitudinal() const;
 
-        /// Return the sideways direction of the tire in world space (only meaningful if hasContact())
+        /// Return the sideways (right) direction of the tire in world space (only meaningful if hasContact())
         const Vector3& getContactLateral() const;
 
         /// Return the current suspension length (m)
@@ -304,8 +346,14 @@ struct VehicleConstraintSettings {
  *    correction like the joints;
  *  - tire friction along the rolling direction and sideways, each an impulse clamped to a
  *    friction coefficient times the normal impulse. The longitudinal one couples the spin of
- *    the wheel to the ground: a free wheel spins up to roll without slipping, and (from the
- *    next step) drive and brake torques on the wheel become forces on the road.
+ *    the wheel to the ground: a free wheel spins up to roll without slipping, a driven wheel
+ *    pushes the vehicle (or spins if the tire cannot hold the torque) and a braked wheel stops
+ *    the vehicle up to what the brake and the tire can transmit.
+ *
+ * Driving is done per wheel: VehicleWheel::setSteerAngle(), setDriveTorque() and
+ * setBrakeTorque(). How an engine, gearbox and differential distribute torque between the
+ * wheels is left to the application (or a later controller class), which keeps this class a
+ * pure constraint.
  *
  * The wheels themselves have no collider: the chassis is the only body, and the wheel is a
  * ray. This is the usual arcade/simulation compromise (see Jolt's VehicleConstraint, which
@@ -313,8 +361,6 @@ struct VehicleConstraintSettings {
  *
  * Create with PhysicsWorld::createVehicle(), destroy with PhysicsWorld::destroyVehicle().
  * Destroying the chassis body destroys the vehicle too.
- *
- * Not yet: steering, drive and brake inputs, anti-roll bars.
  */
 class VehicleConstraint {
 
@@ -380,7 +426,7 @@ class VehicleConstraint {
         /// Return a wheel
         const VehicleWheel& getWheel(uint32 index) const;
 
-        /// Return a wheel (writable, to change its settings or spin)
+        /// Return a wheel (writable, to change its settings, inputs or spin)
         VehicleWheel& getWheel(uint32 index);
 
         /// Return the up direction of the vehicle in chassis local space
@@ -402,8 +448,14 @@ class VehicleConstraint {
         void setRaycastCategoryMaskBits(unsigned short maskBits);
 
         /// Return the world-space centre of a wheel (attachment point + suspension length along
-        /// the suspension direction), for rendering
+        /// the suspension direction)
         Vector3 getWheelCenterWorld(uint32 index) const;
+
+        /// Return the world-space transform of a wheel for rendering: at the wheel centre, steered
+        /// and rotated by the rotation angle. In the space of this transform the wheel points its
+        /// wheelForward forward and wheelUp up, and spins about their cross product (the axle):
+        /// with the defaults, a wheel model along +z with +y up, turning about +x.
+        Transform getWheelWorldTransform(uint32 index) const;
 
         /// Return the total force (N) the suspension (spring and hard stop) applied to the chassis
         /// this step, summed over all wheels along their contact normals
@@ -423,6 +475,37 @@ RP3D_FORCE_INLINE const VehicleWheelSettings& VehicleWheel::getSettings() const 
 // Return the settings of the wheel (writable)
 RP3D_FORCE_INLINE VehicleWheelSettings& VehicleWheel::getSettings() {
     return mSettings;
+}
+
+// Return the steer angle
+RP3D_FORCE_INLINE decimal VehicleWheel::getSteerAngle() const {
+    return mSteerAngle;
+}
+
+// Set the steer angle
+RP3D_FORCE_INLINE void VehicleWheel::setSteerAngle(decimal angle) {
+    mSteerAngle = clamp(angle, -mSettings.maxSteerAngle, mSettings.maxSteerAngle);
+}
+
+// Return the drive torque
+RP3D_FORCE_INLINE decimal VehicleWheel::getDriveTorque() const {
+    return mDriveTorque;
+}
+
+// Set the drive torque
+RP3D_FORCE_INLINE void VehicleWheel::setDriveTorque(decimal torque) {
+    mDriveTorque = torque;
+}
+
+// Return the brake torque
+RP3D_FORCE_INLINE decimal VehicleWheel::getBrakeTorque() const {
+    return mBrakeTorque;
+}
+
+// Set the brake torque
+RP3D_FORCE_INLINE void VehicleWheel::setBrakeTorque(decimal torque) {
+    assert(torque >= decimal(0.0));
+    mBrakeTorque = std::max(decimal(0.0), torque);
 }
 
 // Return true if the wheel is touching something

@@ -30,10 +30,17 @@
 
 using namespace reactphysics3d;
 
+// Rotation of `angle` radians about the unit vector `axis`
+static Quaternion rotationAboutAxis(const Vector3& axis, decimal angle) {
+    const decimal halfAngle = decimal(0.5) * angle;
+    return Quaternion(axis * std::sin(halfAngle), std::cos(halfAngle));
+}
+
 // Constructor
 VehicleWheel::VehicleWheel(const VehicleWheelSettings& settings)
-             : mSettings(settings), mContactBody(nullptr), mContactBodyComponentIndex(0), mIsContactBodyFixed(true),
-               mContactPoint(0, 0, 0), mContactNormal(0, 1, 0), mContactLongitudinal(0, 0, 1), mContactLateral(1, 0, 0),
+             : mSettings(settings), mSteerAngle(decimal(0.0)), mDriveTorque(decimal(0.0)), mBrakeTorque(decimal(0.0)), mBrakeImpulse(decimal(0.0)),
+               mContactBody(nullptr), mContactBodyComponentIndex(0), mIsContactBodyFixed(true),
+               mContactPoint(0, 0, 0), mContactNormal(0, 1, 0), mContactLongitudinal(0, 0, 1), mContactLateral(-1, 0, 0),
                mR1(0, 0, 0), mR2(0, 0, 0), mAxlePlaneConstant(decimal(0.0)),
                mSuspensionLength(settings.suspensionMaxLength), mAngularVelocity(decimal(0.0)), mRotationAngle(decimal(0.0)) {
 
@@ -77,6 +84,27 @@ Vector3 VehicleConstraint::getWheelCenterWorld(uint32 index) const {
     const Vector3 anchor = transform * wheel.mSettings.position;
     const Vector3 direction = transform.getOrientation() * wheel.mSettings.suspensionDirection.getUnit();
     return anchor + direction * wheel.mSuspensionLength;
+}
+
+// Return the world-space transform of a wheel for rendering
+/**
+ * @param index Index of the wheel
+ * @return Transform at the wheel centre, steered about the steering axis and rotated about the axle
+ */
+Transform VehicleConstraint::getWheelWorldTransform(uint32 index) const {
+
+    assert(index < mWheels.size());
+    const VehicleWheel& wheel = mWheels[index];
+    const VehicleWheelSettings& settings = wheel.mSettings;
+
+    // Roll about the axle (wheelUp x wheelForward: the left-pointing axle, so a positive angle
+    // rolls the top of the wheel forward), then steer, then the chassis orientation
+    const Vector3 axle = settings.wheelUp.cross(settings.wheelForward).getUnit();
+    const Quaternion roll = rotationAboutAxis(axle, wheel.mRotationAngle);
+    const Quaternion steer = rotationAboutAxis(settings.steeringAxis.getUnit(), wheel.mSteerAngle);
+    const Quaternion orientation = mBody->getTransform().getOrientation() * steer * roll;
+
+    return Transform(getWheelCenterWorld(index), orientation);
 }
 
 // Return the total force the suspension applied to the chassis this step
