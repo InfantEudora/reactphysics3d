@@ -38,7 +38,7 @@ namespace reactphysics3d {
 /**
  * Unit test for the VehicleConstraint class: a four-wheeled chassis dropped onto a static
  * floor, checked against the analytical equilibrium (suspension carries the weight, car level,
- * wheels resting their tread on the ground).
+ * wheels resting their tread on the ground), then rolling, sliding sideways and bottoming out.
  */
 class TestVehicleConstraint : public Test {
 
@@ -60,6 +60,7 @@ class TestVehicleConstraint : public Test {
         static constexpr decimal RADIUS = decimal(0.3);
         static constexpr decimal MIN_LENGTH = decimal(0.2);
         static constexpr decimal MAX_LENGTH = decimal(0.5);
+        static constexpr decimal WHEEL_INERTIA = decimal(0.9);
 
         // ---------- Methods ---------- //
 
@@ -72,13 +73,13 @@ class TestVehicleConstraint : public Test {
 
             const Vector3 floorNormal = floorOrientation * Vector3(0, 1, 0);
 
-            // Floor: 20 x 1 x 20 box whose top face passes through the origin
+            // Floor: 40 x 1 x 40 box whose top face passes through the origin
             mFloor = mWorld->createRigidBody(Transform(floorNormal * decimal(-0.5), floorOrientation));
             mFloor->setType(BodyType::STATIC);
-            BoxShape* floorShape = mPhysicsCommon.createBoxShape(Vector3(10, 0.5, 10));
+            BoxShape* floorShape = mPhysicsCommon.createBoxShape(Vector3(20, 0.5, 20));
             mFloorCollider = mFloor->addCollider(floorShape, Transform::identity());
 
-            // Chassis: 1.6 x 0.5 x 3.6 box, 1000 kg
+            // Chassis: 1.6 x 0.5 x 3.6 box, 1000 kg, forward along +z
             mChassis = mWorld->createRigidBody(Transform(floorNormal * height, floorOrientation));
             BoxShape* chassisShape = mPhysicsCommon.createBoxShape(Vector3(0.8, 0.25, 1.8));
             mChassisCollider = mChassis->addCollider(chassisShape, Transform::identity());
@@ -95,6 +96,7 @@ class TestVehicleConstraint : public Test {
                 wheel.suspensionMinLength = MIN_LENGTH;
                 wheel.suspensionMaxLength = MAX_LENGTH;
                 wheel.radius = RADIUS;
+                wheel.inertia = WHEEL_INERTIA;
                 wheel.suspensionSpring = SpringSettings::fromFrequencyAndDampingRatio(1.5, 0.5);
                 mVehicle->addWheel(wheel);
             }
@@ -115,6 +117,21 @@ class TestVehicleConstraint : public Test {
             }
         }
 
+        /// Forward direction of the chassis in world space
+        Vector3 forward() const {
+            return mChassis->getTransform().getOrientation() * Vector3(0, 0, 1);
+        }
+
+        /// Up direction of the chassis in world space
+        Vector3 up() const {
+            return mChassis->getTransform().getOrientation() * Vector3(0, 1, 0);
+        }
+
+        /// Right direction of the chassis in world space
+        Vector3 right() const {
+            return mChassis->getTransform().getOrientation() * Vector3(1, 0, 0);
+        }
+
     public :
 
         // ---------- Methods ---------- //
@@ -130,11 +147,14 @@ class TestVehicleConstraint : public Test {
             testCreation();
             testRestOnFlatGround();
             testInTheAir();
-            testSlopeNormalForce();
+            testFreeWheelSpinDown();
+            testRollsDownSlope();
+            testRollingAndLateralGrip();
+            testHardStop();
             testDestroyBodyDestroysVehicle();
         }
 
-        /// The vehicle is registered in the world and its wheels start at full droop
+        /// The vehicle is registered in the world and its wheels start at full droop, not spinning
         void testCreation() {
             createScene(Quaternion::identity(), decimal(1.3));
 
@@ -144,17 +164,22 @@ class TestVehicleConstraint : public Test {
             rp3d_test(mVehicle->getBody() == mChassis);
             rp3d_test(mVehicle->getNbWheels() == 4);
             for (uint32 i = 0; i < 4; i++) {
-                rp3d_test(!mVehicle->getWheel(i).hasContact());
-                rp3d_test(approxEqual(mVehicle->getWheel(i).getSuspensionLength(), MAX_LENGTH));
-                rp3d_test(approxEqual(mVehicle->getWheel(i).getSuspensionImpulse(), decimal(0.0)));
+                const VehicleWheel& wheel = mVehicle->getWheel(i);
+                rp3d_test(!wheel.hasContact());
+                rp3d_test(!wheel.hasHitHardStop());
+                rp3d_test(approxEqual(wheel.getSuspensionLength(), MAX_LENGTH));
+                rp3d_test(approxEqual(wheel.getNormalImpulse(), decimal(0.0)));
+                rp3d_test(approxEqual(wheel.getAngularVelocity(), decimal(0.0)));
             }
             rp3d_test(Vector3::approxEqual(mVehicle->getLocalUp(), Vector3(0, 1, 0)));
+            rp3d_test(Vector3::approxEqual(mVehicle->getLocalForward(), Vector3(0, 0, 1)));
 
             destroyScene();
         }
 
         /// Dropped onto flat ground the car settles level, with all four wheels touching, the
-        /// suspension carrying exactly the weight and every tread resting on the floor
+        /// suspension carrying exactly the weight, every tread resting on the floor and no tire
+        /// force or wheel spin
         void testRestOnFlatGround() {
             createScene(Quaternion::identity(), decimal(1.3));
             step(360);
@@ -166,11 +191,17 @@ class TestVehicleConstraint : public Test {
             for (uint32 i = 0; i < 4; i++) {
                 const VehicleWheel& wheel = mVehicle->getWheel(i);
                 rp3d_test(wheel.hasContact());
+                rp3d_test(!wheel.hasHitHardStop());
                 rp3d_test(wheel.getContactBody() == mFloor);
                 rp3d_test(Vector3::approxEqual(wheel.getContactNormal(), Vector3(0, 1, 0), decimal(1e-3)));
+                rp3d_test(Vector3::approxEqual(wheel.getContactLongitudinal(), Vector3(0, 0, 1), decimal(1e-3)));
+                rp3d_test(Vector3::approxEqual(wheel.getContactLateral(), Vector3(1, 0, 0), decimal(1e-3)));
                 rp3d_test(std::abs(wheel.getContactPoint().y) < decimal(1e-3));
-                // Each wheel carries a quarter of the weight
+                // Each wheel carries a quarter of the weight, with no tire force at rest
                 rp3d_test(std::abs(wheel.getSuspensionImpulse() / TIME_STEP - weight / decimal(4.0)) < weight * decimal(0.02));
+                rp3d_test(std::abs(wheel.getLongitudinalImpulse() / TIME_STEP) < decimal(1.0));
+                rp3d_test(std::abs(wheel.getLateralImpulse() / TIME_STEP) < decimal(1.0));
+                rp3d_test(std::abs(wheel.getAngularVelocity()) < decimal(0.01));
                 // The tread rests on the floor: wheel centre one radius above it
                 rp3d_test(std::abs(mVehicle->getWheelCenterWorld(i).y - RADIUS) < decimal(0.005));
                 minLength = std::min(minLength, wheel.getSuspensionLength());
@@ -182,15 +213,14 @@ class TestVehicleConstraint : public Test {
             rp3d_test(maxLength - minLength < decimal(0.002));
 
             // Level and at rest
-            const Vector3 up = mChassis->getTransform().getOrientation() * Vector3(0, 1, 0);
-            rp3d_test(up.y > decimal(0.9999));
+            rp3d_test(up().y > decimal(0.9999));
             rp3d_test(mChassis->getLinearVelocity().length() < decimal(0.01));
             rp3d_test(mChassis->getAngularVelocity().length() < decimal(0.01));
 
             destroyScene();
         }
 
-        /// A car far above the ground is in free fall: no contacts, no suspension force
+        /// A car far above the ground is in free fall: no contacts, no forces
         void testInTheAir() {
             createScene(Quaternion::identity(), decimal(5.0));
             step(10);
@@ -206,20 +236,119 @@ class TestVehicleConstraint : public Test {
             destroyScene();
         }
 
-        /// On a 10 degree slope (no tire friction yet, so the car slides) the suspension carries
-        /// the weight component normal to the slope
-        void testSlopeNormalForce() {
+        /// A spinning wheel in the air slows down by its angular damping only: w *= (1 - c dt) each step
+        void testFreeWheelSpinDown() {
+            // High enough not to reach the ground within the test (1 s of free fall is 4.9 m)
+            createScene(Quaternion::identity(), decimal(30.0));
+            mVehicle->getWheel(0).setAngularVelocity(decimal(10.0));
+            const decimal damping = mVehicle->getWheel(0).getSettings().angularDamping;
+            step(60);
+
+            const decimal expected = decimal(10.0) * std::pow(decimal(1.0) - damping * TIME_STEP, decimal(60.0));
+            rp3d_test(std::abs(mVehicle->getWheel(0).getAngularVelocity() - expected) < decimal(0.01));
+            rp3d_test(mVehicle->getWheel(0).getRotationAngle() >= decimal(0.0));
+            rp3d_test(mVehicle->getWheel(0).getRotationAngle() < decimal(2.0) * PI_RP3D);
+            rp3d_test(approxEqual(mVehicle->getWheel(1).getAngularVelocity(), decimal(0.0)));
+
+            destroyScene();
+        }
+
+        /// On a 10 degree slope (facing downhill) a car with free wheels rolls down: the suspension
+        /// carries m g cos(theta), the wheels roll without slipping, and the chassis accelerates at
+        /// g sin(theta) reduced by the rotational inertia of the wheels
+        void testRollsDownSlope() {
             const decimal angle = decimal(10.0) * PI_RP3D / decimal(180.0);
-            createScene(Quaternion::fromEulerAngles(0, 0, angle), decimal(1.3));
+            // Rotation about x: the chassis forward (+z) points downhill along the slope
+            createScene(Quaternion::fromEulerAngles(angle, 0, 0), decimal(1.3));
             step(150);
 
-            const decimal expected = MASS * GRAVITY * std::cos(angle);
-            rp3d_test(std::abs(mVehicle->getTotalSuspensionForce(TIME_STEP) - expected) < expected * decimal(0.03));
+            const decimal expectedNormal = MASS * GRAVITY * std::cos(angle);
+            rp3d_test(std::abs(mVehicle->getTotalSuspensionForce(TIME_STEP) - expectedNormal) < expectedNormal * decimal(0.03));
+
+            // Rolling down the slope, still level with it, not drifting sideways
+            const decimal forwardSpeed = mChassis->getLinearVelocity().dot(forward());
+            rp3d_test(forwardSpeed > decimal(3.0) && forwardSpeed < decimal(4.5));
+            rp3d_test(std::abs(mChassis->getLinearVelocity().dot(right())) < decimal(0.02));
+            rp3d_test(std::abs(up().dot(mFloor->getTransform().getOrientation() * Vector3(0, 1, 0)) - decimal(1.0)) < decimal(1e-3));
+
+            // Wheels roll without slipping: surface speed equals the ground speed of the chassis
             for (uint32 i = 0; i < 4; i++) {
-                rp3d_test(mVehicle->getWheel(i).hasContact());
+                const VehicleWheel& wheel = mVehicle->getWheel(i);
+                rp3d_test(wheel.hasContact());
+                rp3d_test(std::abs(wheel.getAngularVelocity() * RADIUS - forwardSpeed) < forwardSpeed * decimal(0.05));
             }
-            // Sliding down the slope (negative x is downhill for a positive rotation about z)
-            rp3d_test(mChassis->getLinearVelocity().x < decimal(-0.5));
+
+            // Acceleration: g sin(theta) * m / (m + 4 I / r^2), measured over the next 60 steps
+            const decimal speedBefore = forwardSpeed;
+            step(60);
+            const decimal speedAfter = mChassis->getLinearVelocity().dot(forward());
+            const decimal expectedAcceleration = GRAVITY * std::sin(angle) * MASS / (MASS + decimal(4.0) * WHEEL_INERTIA / (RADIUS * RADIUS));
+            rp3d_test(std::abs((speedAfter - speedBefore) / decimal(1.0) - expectedAcceleration) < expectedAcceleration * decimal(0.05));
+
+            destroyScene();
+        }
+
+        /// Pushed forward the car keeps rolling (only the wheels spinning up takes some speed);
+        /// pushed sideways the tires stop it within a fraction of a second
+        void testRollingAndLateralGrip() {
+            createScene(Quaternion::identity(), decimal(1.3));
+            step(180);
+
+            // Forward push: free-rolling wheels, so the momentum is shared with the wheel inertia
+            // and the rest is kept: v = v0 * m / (m + 4 I / r^2)
+            mChassis->setLinearVelocity(Vector3(0, 0, 5));
+            step(90);
+            const decimal expectedSpeed = decimal(5.0) * MASS / (MASS + decimal(4.0) * WHEEL_INERTIA / (RADIUS * RADIUS));
+            const decimal forwardSpeed = mChassis->getLinearVelocity().z;
+            rp3d_test(std::abs(forwardSpeed - expectedSpeed) < expectedSpeed * decimal(0.03));
+            rp3d_test(std::abs(mChassis->getLinearVelocity().x) < decimal(0.02));
+            for (uint32 i = 0; i < 4; i++) {
+                rp3d_test(std::abs(mVehicle->getWheel(i).getAngularVelocity() * RADIUS - forwardSpeed) < forwardSpeed * decimal(0.03));
+            }
+
+            // Sideways push: the tires stop the contact patches almost at once, but the impulse acts
+            // at ground level, well below the centre of mass, so the body rolls on its suspension
+            // and sways for a couple of cycles (1.5 Hz, ratio 0.5) before the sideways motion is gone
+            mChassis->setLinearVelocity(Vector3(2, 0, 0));
+            step(120);
+            rp3d_test(std::abs(mChassis->getLinearVelocity().x) < decimal(0.05));
+            rp3d_test(up().y > decimal(0.98));
+            // The wheels were still spinning at the forward speed when the push replaced the
+            // velocity, so they hand a little of that back: v = v_wheels * (4 I / r^2) / (m + 4 I / r^2)
+            const decimal expectedDrift = forwardSpeed * (decimal(4.0) * WHEEL_INERTIA / (RADIUS * RADIUS)) / (MASS + decimal(4.0) * WHEEL_INERTIA / (RADIUS * RADIUS));
+            rp3d_test(std::abs(mChassis->getLinearVelocity().z - expectedDrift) < decimal(0.05));
+
+            destroyScene();
+        }
+
+        /// Dropped from high up the suspension bottoms out: the hard stop engages and keeps the
+        /// axle from going below its minimum length, then the car settles normally
+        void testHardStop() {
+            createScene(Quaternion::identity(), decimal(3.0));
+
+            bool hardStopSeen = false;
+            decimal minLength = MAX_LENGTH;
+            for (int i = 0; i < 360; i++) {
+                mWorld->update(TIME_STEP);
+                for (uint32 w = 0; w < 4; w++) {
+                    const VehicleWheel& wheel = mVehicle->getWheel(w);
+                    hardStopSeen |= wheel.hasHitHardStop();
+                    minLength = std::min(minLength, wheel.getSuspensionLength());
+                }
+            }
+            rp3d_test(hardStopSeen);
+            // The hard stop is a constraint like the others: a little penetration is corrected,
+            // a lot never happens
+            rp3d_test(minLength > MIN_LENGTH - decimal(0.03));
+
+            // Settled afterwards
+            const decimal weight = MASS * GRAVITY;
+            rp3d_test(std::abs(mVehicle->getTotalSuspensionForce(TIME_STEP) - weight) < weight * decimal(0.02));
+            rp3d_test(up().y > decimal(0.9999));
+            rp3d_test(mChassis->getLinearVelocity().length() < decimal(0.01));
+            for (uint32 w = 0; w < 4; w++) {
+                rp3d_test(!mVehicle->getWheel(w).hasHitHardStop());
+            }
 
             destroyScene();
         }

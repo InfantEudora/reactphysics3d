@@ -42,8 +42,10 @@ class VehicleWheel;
 // Class SolveVehicleSystem
 /**
  * This class is responsible to solve the VehicleConstraint constraints. At the start of a
- * step it casts the wheel rays to find the ground under each wheel and sets up one suspension
- * AxisConstraintPart per touching wheel; during the velocity iterations it solves them.
+ * step it casts the wheel rays to find the ground under each wheel and sets up the suspension,
+ * hard stop and tire friction AxisConstraintParts per touching wheel; during the velocity
+ * iterations it solves them, and in the position iterations it keeps fully compressed
+ * suspensions from sinking through the ground.
  *
  * Unlike the joints, vehicles are not ECS components: the number of wheels varies per vehicle
  * and the second body of every wheel constraint (the ground) changes from step to step, so
@@ -84,8 +86,17 @@ class SolveVehicleSystem {
 
         // -------------------- Methods -------------------- //
 
-        /// Find the ground under a wheel and set up its suspension constraint
+        /// Find the ground under a wheel and set up its constraints
         void initWheel(VehicleConstraint& vehicle, VehicleWheel& wheel, const Transform& bodyTransform, const Vector3& worldUp);
+
+        /// Solve the suspension spring and hard stop of the wheels of a vehicle
+        void solveSuspension(VehicleConstraint& vehicle, const AxisConstraintBody& chassis);
+
+        /// Solve the longitudinal tire friction of the wheels of a vehicle (and update their spin)
+        void solveLongitudinalFriction(VehicleConstraint& vehicle, const AxisConstraintBody& chassis);
+
+        /// Solve the lateral tire friction of the wheels of a vehicle
+        void solveLateralFriction(VehicleConstraint& vehicle, const AxisConstraintBody& chassis);
 
         /// Build the view of the chassis the AxisConstraintPart solves against
         AxisConstraintBody makeChassisBody(const VehicleConstraint& vehicle);
@@ -104,7 +115,7 @@ class SolveVehicleSystem {
         /// Destructor
         ~SolveVehicleSystem() = default;
 
-        /// Cast the wheel rays and initialize the suspension constraints before solving
+        /// Cast the wheel rays and initialize the constraints before solving
         void initBeforeSolve();
 
         /// Warm start the constraints (apply the previous impulses at the beginning of the step)
@@ -113,7 +124,7 @@ class SolveVehicleSystem {
         /// Solve the velocity constraints
         void solveVelocityConstraint();
 
-        /// Solve the position constraints (nothing yet: the suspension is a soft constraint)
+        /// Solve the position constraints (hard stop of a fully compressed suspension)
         void solvePositionConstraint();
 
         /// Set the time step

@@ -43,8 +43,8 @@ class MemoryAllocator;
 // Structure VehicleWheelSettings
 /**
  * Describes one wheel of a VehicleConstraint: where its suspension attaches to the chassis,
- * which way it travels, how long it is and how it springs. All positions and directions are
- * in the local space of the chassis body.
+ * which way it travels, how long it is, how it springs, and how its tire grips. All positions
+ * and directions are in the local space of the chassis body.
  */
 struct VehicleWheelSettings {
 
@@ -58,13 +58,21 @@ struct VehicleWheelSettings {
         /// Direction the suspension extends in (points down for a normal car)
         Vector3 suspensionDirection;
 
-        /// Suspension length at full compression (m), measured from position along suspensionDirection
+        /// Forward direction of the wheel when not steered (usually the vehicle forward direction).
+        /// Together with wheelUp it defines the rolling direction of the tire.
+        Vector3 wheelForward;
+
+        /// Up direction of the wheel when not steered (usually the vehicle up direction)
+        Vector3 wheelUp;
+
+        /// Suspension length at full compression (m), measured from position along suspensionDirection.
+        /// Below this a hard stop takes over from the spring.
         decimal suspensionMinLength;
 
         /// Suspension length at full droop (m). This is also the rest length of the spring.
         decimal suspensionMaxLength;
 
-        /// Extra spring compression at full droop (m). The spring's natural length is
+        /// Extra spring compression at full droop (m). The natural length of the spring is
         /// suspensionMaxLength + suspensionPreloadLength, so the wheel already pushes at full
         /// droop. Note this makes touch-down a discontinuity and hence bouncier.
         decimal suspensionPreloadLength;
@@ -80,29 +88,45 @@ struct VehicleWheelSettings {
         /// Width of the wheel (m). Only used for rendering helpers.
         decimal width;
 
-        /// If true, suspension forces are applied at suspensionForcePoint (fixed on the chassis)
-        /// instead of at the contact point. Less accurate against dynamic ground, more stable.
+        /// Moment of inertia of the wheel about its axle (kg.m^2). For a solid cylinder this is
+        /// 0.5 * mass * radius^2: 0.9 for a 20 kg wheel of radius 0.3 m.
+        decimal inertia;
+
+        /// Angular damping of the free-spinning wheel: dw/dt = -angularDamping * w (1/s)
+        decimal angularDamping;
+
+        /// Tire friction coefficient in the rolling direction. The longitudinal impulse a wheel can
+        /// transmit per step is at most this times the normal (suspension + hard stop) impulse.
+        decimal longitudinalFriction;
+
+        /// Tire friction coefficient sideways. The lateral impulse a wheel can transmit per step
+        /// is at most this times the normal impulse.
+        decimal lateralFriction;
+
+        /// If true, tire forces are applied at suspensionForcePoint (fixed on the chassis) instead
+        /// of at the contact point. Less accurate against dynamic ground, more stable.
         bool enableSuspensionForcePoint;
 
-        /// Where suspension forces are applied when enableSuspensionForcePoint is set (chassis
-        /// local space). A good default is the wheel centre at mid travel.
+        /// Where tire forces are applied when enableSuspensionForcePoint is set (chassis local
+        /// space). A good default is the wheel centre at mid travel.
         Vector3 suspensionForcePoint;
 
         // -------------------- Methods -------------------- //
 
         /// Constructor
         VehicleWheelSettings()
-            : position(0, 0, 0), suspensionDirection(0, -1, 0),
+            : position(0, 0, 0), suspensionDirection(0, -1, 0), wheelForward(0, 0, 1), wheelUp(0, 1, 0),
               suspensionMinLength(decimal(0.3)), suspensionMaxLength(decimal(0.5)), suspensionPreloadLength(decimal(0.0)),
               suspensionSpring(SpringSettings::fromFrequencyAndDampingRatio(decimal(1.5), decimal(0.5))),
-              radius(decimal(0.3)), width(decimal(0.1)),
+              radius(decimal(0.3)), width(decimal(0.1)), inertia(decimal(0.9)), angularDamping(decimal(0.2)),
+              longitudinalFriction(decimal(1.0)), lateralFriction(decimal(1.0)),
               enableSuspensionForcePoint(false), suspensionForcePoint(0, 0, 0) {}
 };
 
 // Class VehicleWheel
 /**
  * Runtime state of one wheel of a VehicleConstraint: its settings plus what the solver found
- * this step (ground contact, suspension length, suspension impulse).
+ * this step (ground contact, suspension length, impulses) and the spin of the wheel.
  */
 class VehicleWheel {
 
@@ -128,11 +152,42 @@ class VehicleWheel {
         /// Contact normal (world space, pointing from the ground towards the vehicle)
         Vector3 mContactNormal;
 
+        /// Rolling direction of the tire in the contact plane (world space)
+        Vector3 mContactLongitudinal;
+
+        /// Sideways direction of the tire in the contact plane (world space, to the right)
+        Vector3 mContactLateral;
+
+        /// Lever arm from the ground centre of mass to the point where the tire forces act (world space)
+        Vector3 mR1;
+
+        /// Lever arm from the chassis centre of mass to the point where the tire forces act (world space)
+        Vector3 mR2;
+
+        /// Plane constant of the axle at the moment of contact: mContactNormal . axlePosition.
+        /// The axle at minimum suspension length may not go below this plane (hard stop).
+        decimal mAxlePlaneConstant;
+
         /// Current suspension length (m) from the attachment point along the suspension direction
         decimal mSuspensionLength;
 
+        /// Rotation speed of the wheel about its axle (rad/s), positive when it rolls the vehicle forward
+        decimal mAngularVelocity;
+
+        /// Rotation angle of the wheel about its axle (rad, in [0, 2 pi])
+        decimal mRotationAngle;
+
         /// The suspension spring constraint along the contact normal
         AxisConstraintPart mSuspensionPart;
+
+        /// Hard constraint along the contact normal, active when the suspension is fully compressed
+        AxisConstraintPart mHardStopPart;
+
+        /// Tire friction along the rolling direction
+        AxisConstraintPart mLongitudinalPart;
+
+        /// Tire friction sideways
+        AxisConstraintPart mLateralPart;
 
     public :
 
@@ -159,11 +214,44 @@ class VehicleWheel {
         /// Return the contact normal in world space (only meaningful if hasContact())
         const Vector3& getContactNormal() const;
 
+        /// Return the rolling direction of the tire in world space (only meaningful if hasContact())
+        const Vector3& getContactLongitudinal() const;
+
+        /// Return the sideways direction of the tire in world space (only meaningful if hasContact())
+        const Vector3& getContactLateral() const;
+
         /// Return the current suspension length (m)
         decimal getSuspensionLength() const;
 
+        /// Return true if the suspension is fully compressed and the hard stop is engaged
+        bool hasHitHardStop() const;
+
         /// Return the impulse (N.s) the suspension spring applied to the chassis this step
         decimal getSuspensionImpulse() const;
+
+        /// Return the impulse (N.s) the hard stop applied to the chassis this step
+        decimal getHardStopImpulse() const;
+
+        /// Return the total normal impulse (N.s) this step: suspension spring plus hard stop
+        decimal getNormalImpulse() const;
+
+        /// Return the impulse (N.s) applied along the rolling direction this step (positive pushes the vehicle forward)
+        decimal getLongitudinalImpulse() const;
+
+        /// Return the impulse (N.s) applied sideways this step (positive pushes the vehicle to the right)
+        decimal getLateralImpulse() const;
+
+        /// Return the rotation speed of the wheel about its axle (rad/s), positive when rolling the vehicle forward
+        decimal getAngularVelocity() const;
+
+        /// Set the rotation speed of the wheel about its axle (rad/s)
+        void setAngularVelocity(decimal angularVelocity);
+
+        /// Return the rotation angle of the wheel about its axle (rad, in [0, 2 pi])
+        decimal getRotationAngle() const;
+
+        /// Set the rotation angle of the wheel about its axle (rad)
+        void setRotationAngle(decimal angle);
 
         // -------------------- Friendship -------------------- //
 
@@ -206,10 +294,18 @@ struct VehicleConstraintSettings {
 // Class VehicleConstraint
 /**
  * A wheeled vehicle: one chassis rigid body plus any number of wheels, each a raycast
- * suspension. Every step the solver casts a ray from each wheel's attachment point along its
- * suspension direction; where it hits the ground a spring-damper constraint (AxisConstraintPart)
- * along the contact normal pushes the chassis and the ground body apart, solved implicitly
- * together with the other constraints so it is stable for any stiffness and time step.
+ * suspension. Every step the solver casts a ray from the attachment point of each wheel along
+ * its suspension direction; where it hits the ground, constraints between the chassis and the
+ * ground body are solved together with the other constraints of the world:
+ *
+ *  - a spring-damper along the contact normal (AxisConstraintPart, implicit, stable for any
+ *    stiffness and time step), pushing only;
+ *  - a hard stop along the normal once the suspension is fully compressed, with position
+ *    correction like the joints;
+ *  - tire friction along the rolling direction and sideways, each an impulse clamped to a
+ *    friction coefficient times the normal impulse. The longitudinal one couples the spin of
+ *    the wheel to the ground: a free wheel spins up to roll without slipping, and (from the
+ *    next step) drive and brake torques on the wheel become forces on the road.
  *
  * The wheels themselves have no collider: the chassis is the only body, and the wheel is a
  * ray. This is the usual arcade/simulation compromise (see Jolt's VehicleConstraint, which
@@ -218,8 +314,7 @@ struct VehicleConstraintSettings {
  * Create with PhysicsWorld::createVehicle(), destroy with PhysicsWorld::destroyVehicle().
  * Destroying the chassis body destroys the vehicle too.
  *
- * Current scope: suspension only. Hard stop at minimum length, tire friction, steering and
- * drive come in later steps.
+ * Not yet: steering, drive and brake inputs, anti-roll bars.
  */
 class VehicleConstraint {
 
@@ -285,7 +380,7 @@ class VehicleConstraint {
         /// Return a wheel
         const VehicleWheel& getWheel(uint32 index) const;
 
-        /// Return a wheel (writable, to change its settings)
+        /// Return a wheel (writable, to change its settings or spin)
         VehicleWheel& getWheel(uint32 index);
 
         /// Return the up direction of the vehicle in chassis local space
@@ -310,8 +405,8 @@ class VehicleConstraint {
         /// the suspension direction), for rendering
         Vector3 getWheelCenterWorld(uint32 index) const;
 
-        /// Return the total force (N) the suspension applied to the chassis this step, summed over
-        /// all wheels along their contact normals
+        /// Return the total force (N) the suspension (spring and hard stop) applied to the chassis
+        /// this step, summed over all wheels along their contact normals
         decimal getTotalSuspensionForce(decimal timeStep) const;
 
         // -------------------- Friendship -------------------- //
@@ -350,14 +445,69 @@ RP3D_FORCE_INLINE const Vector3& VehicleWheel::getContactNormal() const {
     return mContactNormal;
 }
 
+// Return the rolling direction of the tire in world space
+RP3D_FORCE_INLINE const Vector3& VehicleWheel::getContactLongitudinal() const {
+    return mContactLongitudinal;
+}
+
+// Return the sideways direction of the tire in world space
+RP3D_FORCE_INLINE const Vector3& VehicleWheel::getContactLateral() const {
+    return mContactLateral;
+}
+
 // Return the current suspension length
 RP3D_FORCE_INLINE decimal VehicleWheel::getSuspensionLength() const {
     return mSuspensionLength;
 }
 
+// Return true if the suspension is fully compressed and the hard stop is engaged
+RP3D_FORCE_INLINE bool VehicleWheel::hasHitHardStop() const {
+    return mHardStopPart.isActive();
+}
+
 // Return the impulse the suspension spring applied this step
 RP3D_FORCE_INLINE decimal VehicleWheel::getSuspensionImpulse() const {
     return mSuspensionPart.getTotalLambda();
+}
+
+// Return the impulse the hard stop applied this step
+RP3D_FORCE_INLINE decimal VehicleWheel::getHardStopImpulse() const {
+    return mHardStopPart.getTotalLambda();
+}
+
+// Return the total normal impulse this step
+RP3D_FORCE_INLINE decimal VehicleWheel::getNormalImpulse() const {
+    return mSuspensionPart.getTotalLambda() + mHardStopPart.getTotalLambda();
+}
+
+// Return the impulse applied along the rolling direction this step
+RP3D_FORCE_INLINE decimal VehicleWheel::getLongitudinalImpulse() const {
+    return mLongitudinalPart.getTotalLambda();
+}
+
+// Return the impulse applied sideways this step
+RP3D_FORCE_INLINE decimal VehicleWheel::getLateralImpulse() const {
+    return mLateralPart.getTotalLambda();
+}
+
+// Return the rotation speed of the wheel about its axle
+RP3D_FORCE_INLINE decimal VehicleWheel::getAngularVelocity() const {
+    return mAngularVelocity;
+}
+
+// Set the rotation speed of the wheel about its axle
+RP3D_FORCE_INLINE void VehicleWheel::setAngularVelocity(decimal angularVelocity) {
+    mAngularVelocity = angularVelocity;
+}
+
+// Return the rotation angle of the wheel about its axle
+RP3D_FORCE_INLINE decimal VehicleWheel::getRotationAngle() const {
+    return mRotationAngle;
+}
+
+// Set the rotation angle of the wheel about its axle
+RP3D_FORCE_INLINE void VehicleWheel::setRotationAngle(decimal angle) {
+    mRotationAngle = angle;
 }
 
 // Return the chassis body

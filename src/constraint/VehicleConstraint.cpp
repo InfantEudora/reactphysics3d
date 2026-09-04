@@ -33,7 +33,9 @@ using namespace reactphysics3d;
 // Constructor
 VehicleWheel::VehicleWheel(const VehicleWheelSettings& settings)
              : mSettings(settings), mContactBody(nullptr), mContactBodyComponentIndex(0), mIsContactBodyFixed(true),
-               mContactPoint(0, 0, 0), mContactNormal(0, 1, 0), mSuspensionLength(settings.suspensionMaxLength) {
+               mContactPoint(0, 0, 0), mContactNormal(0, 1, 0), mContactLongitudinal(0, 0, 1), mContactLateral(1, 0, 0),
+               mR1(0, 0, 0), mR2(0, 0, 0), mAxlePlaneConstant(decimal(0.0)),
+               mSuspensionLength(settings.suspensionMaxLength), mAngularVelocity(decimal(0.0)), mRotationAngle(decimal(0.0)) {
 
 }
 
@@ -55,7 +57,8 @@ VehicleConstraint::VehicleConstraint(PhysicsWorld& world, RigidBody* body, const
 uint32 VehicleConstraint::addWheel(const VehicleWheelSettings& settings) {
 
     assert(settings.suspensionMaxLength >= settings.suspensionMinLength);
-    assert(settings.radius >= decimal(0.0));
+    assert(settings.radius > decimal(0.0));
+    assert(settings.inertia > decimal(0.0));
 
     mWheels.add(VehicleWheel(settings));
     return static_cast<uint32>(mWheels.size() - 1);
@@ -79,14 +82,14 @@ Vector3 VehicleConstraint::getWheelCenterWorld(uint32 index) const {
 // Return the total force the suspension applied to the chassis this step
 /**
  * @param timeStep The time step of the last simulation step
- * @return Sum over the wheels of the suspension impulse divided by the time step (N)
+ * @return Sum over the wheels of the normal (spring + hard stop) impulse divided by the time step (N)
  */
 decimal VehicleConstraint::getTotalSuspensionForce(decimal timeStep) const {
 
     assert(timeStep > MACHINE_EPSILON);
     decimal totalImpulse = decimal(0.0);
     for (uint64 i = 0; i < mWheels.size(); i++) {
-        totalImpulse += mWheels[i].mSuspensionPart.getTotalLambda();
+        totalImpulse += mWheels[i].getNormalImpulse();
     }
     return totalImpulse / timeStep;
 }
