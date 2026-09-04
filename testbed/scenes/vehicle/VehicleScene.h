@@ -30,7 +30,6 @@
 #include "openglframework.h"
 #include <reactphysics3d/reactphysics3d.h>
 #include "Box.h"
-#include "Sphere.h"
 #include "SceneDemo.h"
 
 namespace nanogui { class Slider; class Label; }
@@ -43,13 +42,15 @@ const int NB_WHEELS = 4;
 
 // Class VehicleScene
 /**
- * A four-wheeled chassis on a VehicleConstraint (raycast wheel suspension). The wheels are
- * rays, not bodies: the spheres and struts are cosmetic and follow what the constraint reports.
+ * A drivable four-wheeled chassis on a VehicleConstraint (raycast wheel suspension). The wheels
+ * are rays, not bodies: the wheel boxes and struts are cosmetic and follow what the constraint
+ * reports, spinning and steering with it.
  *
- * Suspension and tire friction, no steering or drive yet: drop the car flat or tilted, push it
- * down, forward or sideways, drop it onto the ramp, and tune frequency, damping, mass and tire
- * friction live. The status lines show each wheel's suspension length and normal, longitudinal
- * and lateral forces, and the total normal force against the weight.
+ * Drive with the arrow keys (up/down: rear wheel torque, left/right: front wheel steering) and
+ * brake with space. Drop the car flat, tilted or onto the ramp, push it, and tune suspension,
+ * mass, tire friction, engine torque, brake torque and steering lock live. The status lines
+ * show each wheel's suspension length, forces and surface speed, and the total normal force
+ * against the weight. The camera follows the car.
  */
 class VehicleScene : public SceneDemo {
 
@@ -61,6 +62,7 @@ class VehicleScene : public SceneDemo {
         static constexpr float CHASSIS_HALF_HEIGHT = 0.25f;
         static constexpr float CHASSIS_HALF_LENGTH = 1.8f;
         static constexpr float WHEEL_RADIUS = 0.3f;
+        static constexpr float WHEEL_WIDTH = 0.2f;
         static constexpr float WHEEL_X = 0.8f;             // half track
         static constexpr float WHEEL_Z = 1.4f;             // half wheelbase
         static constexpr float WHEEL_ANCHOR_Y = -0.2f;     // strut attachment below the chassis centre
@@ -69,7 +71,7 @@ class VehicleScene : public SceneDemo {
         static constexpr float SPAWN_HEIGHT = 1.3f;        // chassis centre at spawn (wheels just off the ground)
         static constexpr float DROP_HEIGHT = 2.5f;
         static constexpr float TILT_DROP_ANGLE_DEG = 20.0f;
-        static constexpr float PUSH_SPEED = 3.0f;          // m/s added by the push action
+        static constexpr float PUSH_SPEED = 3.0f;          // m/s added by the push actions
         static constexpr float RAMP_X = 6.0f;
         static constexpr float RAMP_ANGLE_DEG = 12.0f;
 
@@ -79,7 +81,7 @@ class VehicleScene : public SceneDemo {
         Box* mRamp;
         Box* mChassis;
         rp3d::VehicleConstraint* mVehicle;
-        Sphere* mWheelVisuals[NB_WHEELS];   // cosmetic
+        Box* mWheelVisuals[NB_WHEELS];      // cosmetic
         Box* mStrutVisuals[NB_WHEELS];      // cosmetic
 
         /// Live settings (kept across resets)
@@ -87,6 +89,17 @@ class VehicleScene : public SceneDemo {
         float mDampingRatio;     // 1 = critical
         float mMassKg;
         float mTireFriction;     // longitudinal and lateral friction coefficient
+        float mEngineTorque;     // N.m per driven (rear) wheel at full throttle
+        float mBrakeTorque;      // N.m per wheel when braking
+        float mMaxSteerDeg;      // steering lock of the front wheels
+
+        /// Driver inputs from the keys
+        float mThrottle;         // -1, 0 or 1
+        float mSteerInput;       // -1 (right), 0 or 1 (left)
+        bool mBraking;
+
+        /// Camera follow
+        rp3d::Vector3 mLastChassisPosition;
 
         nanogui::Label* mStatusLabel;
         nanogui::Label* mWheelLabels[NB_WHEELS];   // one line per wheel (nanogui labels do not wrap on newlines)
@@ -109,6 +122,9 @@ class VehicleScene : public SceneDemo {
 
         /// Push the live settings into the vehicle
         void applySettings();
+
+        /// Turn the current key inputs into wheel torques and steer angles
+        void applyDriverInputs();
 
         /// Move the cosmetic wheels and struts to where the constraint says they are
         void updateVisuals();
@@ -141,16 +157,17 @@ class VehicleScene : public SceneDemo {
         /// Destroy the physics world
         void destroyPhysicsWorld();
 
-        /// One physics step, then refresh the visuals
+        /// One physics step: apply the driver inputs, step, refresh the visuals
         virtual void updatePhysics() override;
 
-        /// Per frame: refresh the status label
+        /// Per frame: follow the car with the camera, refresh the status labels
         virtual void update() override;
 
         /// Scene panel controls
         virtual void createGuiWidgets(nanogui::Widget* parent) override;
 
-        /// Keys: D drop, T tilted drop, K push down, N drop on the ramp, F push forward, S push sideways
+        /// Keys: arrows drive and steer, space brakes; D drop, T tilted drop, N drop on the ramp,
+        /// K push down, F push forward, S push sideways
         virtual bool keyboardEvent(int key, int scancode, int action, int mods) override;
 };
 

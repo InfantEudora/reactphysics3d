@@ -66,6 +66,9 @@ VehicleScene::VehicleScene(const std::string& name, EngineSettings& settings, re
       : SceneDemo(name, settings, physicsCommon, true),
         mFloor(nullptr), mRamp(nullptr), mChassis(nullptr), mVehicle(nullptr),
         mFrequency(1.5f), mDampingRatio(0.5f), mMassKg(1000.0f), mTireFriction(1.0f),
+        mEngineTorque(600.0f), mBrakeTorque(1500.0f), mMaxSteerDeg(30.0f),
+        mThrottle(0.0f), mSteerInput(0.0f), mBraking(false),
+        mLastChassisPosition(0, SPAWN_HEIGHT, 0),
         mStatusLabel(nullptr) {
 
     for (int i = 0; i < NB_WHEELS; i++) {
@@ -75,7 +78,7 @@ VehicleScene::VehicleScene(const std::string& name, EngineSettings& settings, re
     }
 
     // Compute the radius and the center of the scene
-    openglframework::Vector3 center(2, 0.8f, 0);
+    openglframework::Vector3 center(0, 0.8f, 0);
 
     // Set the center of the scene
     setScenePosition(center, SCENE_RADIUS);
@@ -132,6 +135,13 @@ void VehicleScene::reset() {
 
     destroyPhysicsWorld();
     createPhysicsWorld();
+
+    // Bring the camera back to the car
+    const rp3d::Vector3 chassisPosition = mChassis->getRigidBody()->getTransform().getPosition();
+    const rp3d::Vector3 delta = chassisPosition - mLastChassisPosition;
+    mCamera.translateWorld(Vector3(delta.x, 0, delta.z));
+    mCenterScene += Vector3(delta.x, 0, delta.z);
+    mLastChassisPosition = chassisPosition;
 }
 
 Box* VehicleScene::createBox(rp3d::BodyType type, bool isSimulated, const openglframework::Vector3& size,
@@ -169,42 +179,41 @@ void VehicleScene::createScene() {
 
     const rp3d::Quaternion identity = rp3d::Quaternion::identity();
 
-    // Floor, top sitting at y = 0
-    mFloor = createBox(rp3d::BodyType::STATIC, true, Vector3(30, 0.5f, 30), rp3d::Vector3(0, -0.25f, 0), identity, 0, mFloorColorDemo);
+    // Floor, top sitting at y = 0, large enough to drive around on
+    mFloor = createBox(rp3d::BodyType::STATIC, true, Vector3(200, 0.5f, 200), rp3d::Vector3(0, -0.25f, 0), identity, 0, mFloorColorDemo);
 
     // Ramp: a slab tilted about the Z axis, its uphill edge towards -x
     const rp3d::Quaternion rampRotation = rp3d::Quaternion::fromEulerAngles(0, 0, RAMP_ANGLE_DEG * DEG);
     mRamp = createBox(rp3d::BodyType::STATIC, true, Vector3(6.0f, 0.3f, 6.0f), rp3d::Vector3(RAMP_X, 0.5f, 0), rampRotation, 0, mObjectColorDemo);
 
-    // Chassis: 1.6 x 0.5 x 3.6 box
+    // Chassis: 1.6 x 0.5 x 3.6 box, forward along +z
     mChassis = createBox(rp3d::BodyType::DYNAMIC, true,
                          Vector3(2.0f * CHASSIS_HALF_WIDTH, 2.0f * CHASSIS_HALF_HEIGHT, 2.0f * CHASSIS_HALF_LENGTH),
                          rp3d::Vector3(0, SPAWN_HEIGHT, 0), identity, mMassKg, mObjectColorDemo);
+    mLastChassisPosition = rp3d::Vector3(0, SPAWN_HEIGHT, 0);
 
-    // The vehicle: four wheels at the corners, struts hanging straight down
+    // The vehicle: four wheels at the corners, struts hanging straight down. Wheels 0 and 1 are
+    // the front (+z) left (+x) and right, 2 and 3 the rear.
     rp3d::VehicleConstraintSettings vehicleSettings;
     vehicleSettings.raycastCategoryMaskBits = CATEGORY_GROUND;
     mVehicle = mPhysicsWorld->createVehicle(mChassis->getRigidBody(), vehicleSettings);
     for (int i = 0; i < NB_WHEELS; i++) {
         rp3d::VehicleWheelSettings wheel;
-        wheel.position = rp3d::Vector3((i % 2 == 0) ? -WHEEL_X : WHEEL_X, WHEEL_ANCHOR_Y, (i < 2) ? WHEEL_Z : -WHEEL_Z);
+        wheel.position = rp3d::Vector3((i % 2 == 0) ? WHEEL_X : -WHEEL_X, WHEEL_ANCHOR_Y, (i < 2) ? WHEEL_Z : -WHEEL_Z);
         wheel.suspensionDirection = rp3d::Vector3(0, -1, 0);
         wheel.suspensionMinLength = SUSPENSION_MIN;
         wheel.suspensionMaxLength = SUSPENSION_MAX;
         wheel.radius = WHEEL_RADIUS;
-        wheel.width = 0.2f;
+        wheel.width = WHEEL_WIDTH;
         mVehicle->addWheel(wheel);
     }
     applySettings();
 
-    // Cosmetic wheels (spheres, no collider) and struts
+    // Cosmetic wheels (flat boxes so the spin shows, no collider) and struts
     for (int i = 0; i < NB_WHEELS; i++) {
-        Sphere* sphere = new Sphere(rp3d::BodyType::STATIC, false, WHEEL_RADIUS, mPhysicsCommon, mPhysicsWorld, mMeshFolderPath);
-        sphere->setColor(mSleepingColorDemo);
-        sphere->setSleepingColor(mSleepingColorDemo);
-        mPhysicsObjects.push_back(sphere);
-        makeCosmetic(sphere);
-        mWheelVisuals[i] = sphere;
+        mWheelVisuals[i] = createBox(rp3d::BodyType::STATIC, false, Vector3(WHEEL_WIDTH, 2.0f * WHEEL_RADIUS, 2.0f * WHEEL_RADIUS),
+                                     rp3d::Vector3(0, 0, 0), identity, 0, mSleepingColorDemo);
+        makeCosmetic(mWheelVisuals[i]);
 
         mStrutVisuals[i] = createBox(rp3d::BodyType::STATIC, false, Vector3(0.08f, 0.08f, 1.0f), rp3d::Vector3(0, 0, 0), identity, 0, mSleepingColorDemo);
         makeCosmetic(mStrutVisuals[i]);
@@ -222,8 +231,23 @@ void VehicleScene::applySettings() {
         wheel.suspensionSpring = rp3d::SpringSettings::fromFrequencyAndDampingRatio(mFrequency, mDampingRatio);
         wheel.longitudinalFriction = mTireFriction;
         wheel.lateralFriction = mTireFriction;
+        wheel.maxSteerAngle = mMaxSteerDeg * DEG;
     }
     setBoxMass(mChassis, mMassKg);
+}
+
+// Turn the current key inputs into wheel torques and steer angles
+void VehicleScene::applyDriverInputs() {
+
+    if (mVehicle == nullptr) return;
+
+    for (rp3d::uint32 i = 0; i < mVehicle->getNbWheels(); i++) {
+        rp3d::VehicleWheel& wheel = mVehicle->getWheel(i);
+        const bool isFront = i < 2;
+        wheel.setSteerAngle(isFront ? mSteerInput * mMaxSteerDeg * DEG : 0.0f);
+        wheel.setDriveTorque(isFront ? 0.0f : mThrottle * mEngineTorque);
+        wheel.setBrakeTorque(mBraking ? mBrakeTorque : 0.0f);
+    }
 }
 
 // Stretch a cosmetic box between two world points
@@ -245,13 +269,15 @@ void VehicleScene::updateVisuals() {
     const rp3d::Transform& chassisTransform = mChassis->getRigidBody()->getTransform();
     for (rp3d::uint32 i = 0; i < mVehicle->getNbWheels() && i < NB_WHEELS; i++) {
 
-        const rp3d::Vector3 center = mVehicle->getWheelCenterWorld(i);
+        // The wheel box is modelled along +z with +y up and its width along x, exactly the
+        // convention of getWheelWorldTransform()
+        const rp3d::Transform wheelTransform = mVehicle->getWheelWorldTransform(i);
         if (mWheelVisuals[i]) {
-            mWheelVisuals[i]->setTransform(rp3d::Transform(center, chassisTransform.getOrientation()));
+            mWheelVisuals[i]->setTransform(wheelTransform);
         }
         if (mStrutVisuals[i]) {
             const rp3d::Vector3 anchor = chassisTransform * mVehicle->getWheel(i).getSettings().position;
-            spanBox(mStrutVisuals[i], anchor, center, 0.08f);
+            spanBox(mStrutVisuals[i], anchor, wheelTransform.getPosition(), 0.08f);
         }
     }
 }
@@ -272,10 +298,15 @@ void VehicleScene::placeChassis(const rp3d::Vector3& position, const rp3d::Quate
     body->setTransform(rp3d::Transform(position, orientation));
     body->setLinearVelocity(rp3d::Vector3(0, 0, 0));
     body->setAngularVelocity(rp3d::Vector3(0, 0, 0));
+    for (rp3d::uint32 i = 0; mVehicle != nullptr && i < mVehicle->getNbWheels(); i++) {
+        mVehicle->getWheel(i).setAngularVelocity(0.0f);
+    }
 }
 
 // One physics step
 void VehicleScene::updatePhysics() {
+
+    applyDriverInputs();
 
     SceneDemo::updatePhysics();
 
@@ -287,14 +318,25 @@ void VehicleScene::update() {
 
     SceneDemo::update();
 
+    // Follow the car horizontally
+    if (mChassis) {
+        const rp3d::Vector3 chassisPosition = mChassis->getRigidBody()->getTransform().getPosition();
+        const rp3d::Vector3 delta = chassisPosition - mLastChassisPosition;
+        mCamera.translateWorld(Vector3(delta.x, 0, delta.z));
+        mCenterScene += Vector3(delta.x, 0, delta.z);
+        mLastChassisPosition = chassisPosition;
+    }
+
     if (mStatusLabel && mVehicle && mChassis) {
 
         const float timeStep = static_cast<float>(mEngineSettings.timeStep.count());
         const float g = std::abs(mEngineSettings.gravity.y);
+        const rp3d::Vector3 velocity = mChassis->getRigidBody()->getLinearVelocity();
+        const float speed = velocity.dot(mChassis->getRigidBody()->getTransform().getOrientation() * rp3d::Vector3(0, 0, 1));
 
         std::ostringstream out;
         out << std::fixed << std::setprecision(1)
-            << "Suspension " << mVehicle->getTotalSuspensionForce(timeStep) << " N, weight " << (mMassKg * g) << " N";
+            << "Speed " << (speed * 3.6f) << " km/h, N " << std::setprecision(0) << mVehicle->getTotalSuspensionForce(timeStep) << " / " << (mMassKg * g);
         mStatusLabel->set_caption(out.str());
 
         for (rp3d::uint32 i = 0; i < mVehicle->getNbWheels() && i < NB_WHEELS; i++) {
@@ -321,14 +363,28 @@ void VehicleScene::update() {
 bool VehicleScene::keyboardEvent(int key, int scancode, int action, int mods) {
 
     if (SceneDemo::keyboardEvent(key, scancode, action, mods)) return true;
-    if (action != GLFW_PRESS) return false;
+    if (action == GLFW_REPEAT) return false;
 
+    // Held keys: driving
+    const bool pressed = (action == GLFW_PRESS);
+    switch (key) {
+        case GLFW_KEY_UP:    mThrottle = pressed ? 1.0f : (mThrottle > 0.0f ? 0.0f : mThrottle); return true;
+        case GLFW_KEY_DOWN:  mThrottle = pressed ? -1.0f : (mThrottle < 0.0f ? 0.0f : mThrottle); return true;
+        case GLFW_KEY_LEFT:  mSteerInput = pressed ? 1.0f : (mSteerInput > 0.0f ? 0.0f : mSteerInput); return true;
+        case GLFW_KEY_RIGHT: mSteerInput = pressed ? -1.0f : (mSteerInput < 0.0f ? 0.0f : mSteerInput); return true;
+        case GLFW_KEY_SPACE: mBraking = pressed; return true;
+        default: break;
+    }
+
+    if (!pressed) return false;
+
+    // One-shot keys
     switch (key) {
         case GLFW_KEY_D:
-            placeChassis(rp3d::Vector3(0, DROP_HEIGHT, 0), rp3d::Quaternion::identity());
+            placeChassis(rp3d::Vector3(mLastChassisPosition.x, DROP_HEIGHT, mLastChassisPosition.z), rp3d::Quaternion::identity());
             return true;
         case GLFW_KEY_T:
-            placeChassis(rp3d::Vector3(0, DROP_HEIGHT, 0), rp3d::Quaternion::fromEulerAngles(0, 0, TILT_DROP_ANGLE_DEG * DEG));
+            placeChassis(rp3d::Vector3(mLastChassisPosition.x, DROP_HEIGHT, mLastChassisPosition.z), rp3d::Quaternion::fromEulerAngles(0, 0, TILT_DROP_ANGLE_DEG * DEG));
             return true;
         case GLFW_KEY_N:
             placeChassis(rp3d::Vector3(RAMP_X, DROP_HEIGHT + 1.0f, 0), rp3d::Quaternion::fromEulerAngles(0, 0, RAMP_ANGLE_DEG * DEG));
@@ -358,19 +414,17 @@ void VehicleScene::createGuiWidgets(nanogui::Widget* parent) {
         label->set_fixed_width(230);   // wraps
         return label;
     };
-    addText("A chassis on a VehicleConstraint: four raycast wheels, each a spring-damper along its contact normal with a hard stop, plus tire friction along and across the rolling direction. The spheres and struts are cosmetic.");
-    addText("No steering or drive yet: the wheels roll freely, so on the ramp the car rolls down.");
+    addText("A chassis on a VehicleConstraint: four raycast wheels, each a spring-damper along its contact normal with a hard stop, plus tire friction along and across the rolling direction. Rear wheel drive, front wheel steering. The wheel boxes and struts are cosmetic.");
     addText("Per wheel: suspension length, normal (N), forward (F) and sideways (S) force in newtons, wheel surface speed v in m/s.");
 
     new Label(parent, "Keys", "sans-bold");
-    addText("D : drop the car flat");
-    addText("T : drop it rolled 20 degrees");
-    addText("N : drop it on the ramp");
-    addText("K : push it down");
-    addText("F : push it forward (rolls on)");
-    addText("S : push it sideways (tires stop it)");
+    addText("Up / Down : throttle forward / reverse");
+    addText("Left / Right : steer");
+    addText("Space : brake");
+    addText("D : drop the car flat, T : rolled 20 degrees, N : on the ramp");
+    addText("K : push it down, F : forward, S : sideways");
 
-    new Label(parent, "Suspension", "sans-bold");
+    new Label(parent, "Tuning", "sans-bold");
 
     auto addSlider = [&](const std::string& title, float& value, float minValue, float maxValue, int precision) -> Slider* {
         auto caption = [title, precision](float v) {
@@ -395,15 +449,18 @@ void VehicleScene::createGuiWidgets(nanogui::Widget* parent) {
     addSlider("Damping ratio", mDampingRatio, 0.0f, 2.0f, 2);
     addSlider("Chassis mass (kg)", mMassKg, 200.0f, 3000.0f, 0);
     addSlider("Tire friction", mTireFriction, 0.0f, 2.0f, 2);
+    addSlider("Engine torque per wheel (Nm)", mEngineTorque, 0.0f, 3000.0f, 0);
+    addSlider("Brake torque per wheel (Nm)", mBrakeTorque, 0.0f, 5000.0f, 0);
+    addSlider("Steering lock (deg)", mMaxSteerDeg, 5.0f, 45.0f, 0);
 
     Button* drop = new Button(parent, "Drop flat (D)");
-    drop->set_callback([this] { placeChassis(rp3d::Vector3(0, DROP_HEIGHT, 0), rp3d::Quaternion::identity()); });
+    drop->set_callback([this] { placeChassis(rp3d::Vector3(mLastChassisPosition.x, DROP_HEIGHT, mLastChassisPosition.z), rp3d::Quaternion::identity()); });
     Button* tilt = new Button(parent, "Drop tilted (T)");
-    tilt->set_callback([this] { placeChassis(rp3d::Vector3(0, DROP_HEIGHT, 0), rp3d::Quaternion::fromEulerAngles(0, 0, TILT_DROP_ANGLE_DEG * DEG)); });
+    tilt->set_callback([this] { placeChassis(rp3d::Vector3(mLastChassisPosition.x, DROP_HEIGHT, mLastChassisPosition.z), rp3d::Quaternion::fromEulerAngles(0, 0, TILT_DROP_ANGLE_DEG * DEG)); });
     Button* ramp = new Button(parent, "Drop on ramp (N)");
     ramp->set_callback([this] { placeChassis(rp3d::Vector3(RAMP_X, DROP_HEIGHT + 1.0f, 0), rp3d::Quaternion::fromEulerAngles(0, 0, RAMP_ANGLE_DEG * DEG)); });
 
-    mStatusLabel = new Label(parent, "Suspension force vs weight");
+    mStatusLabel = new Label(parent, "Speed, suspension force vs weight");
     mStatusLabel->set_fixed_width(230);
     for (int i = 0; i < NB_WHEELS; i++) {
         // Non-empty from the start: nanogui lays an empty label out with zero height and does
