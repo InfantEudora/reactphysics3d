@@ -99,17 +99,22 @@ void SolveUprightConstraintSystem::initBeforeSolve() {
                                        mRigidBodyComponents.getBodyType(bodyEntity) == BodyType::DYNAMIC;
         if (!constraint.mIsActiveThisStep) {
             constraint.mPart.deactivate();
+            constraint.mSpinDampingPart.deactivate();
             continue;
         }
 
         constraint.mBodyComponentIndex = mRigidBodyComponents.getEntityIndex(bodyEntity);
         const UprightConstraintSettings& settings = constraint.mSettings;
+        const Quaternion& orientation = mTransformComponents.getTransform(bodyEntity).getOrientation();
+        const AxisConstraintBody world = makeWorldBody();
+        const AxisConstraintBody body = makeBody(constraint);
+
+        // ---------- Righting: keep the body axis inside the cone ---------- //
 
         // How far the body leans, and which way to push it back
         decimal angle;
         Vector3 rotationAxis;
-        const bool tilted = computeTilt(mTransformComponents.getTransform(bodyEntity).getOrientation(),
-                                        settings.localAxis, settings.worldAxis, angle, rotationAxis);
+        const bool tilted = computeTilt(orientation, settings.localAxis, settings.worldAxis, angle, rotationAxis);
         constraint.mCurrentAngle = angle;
 
         // Inside the cone (or exactly upright): free. A body sitting right AT the edge counts as
@@ -118,27 +123,49 @@ void SolveUprightConstraintSystem::initBeforeSolve() {
         // spin that keeps pushing it over.
         if (!tilted || angle < settings.maxAngle - LIMIT_TOLERANCE) {
             constraint.mPart.deactivate();
-            continue;
-        }
-        constraint.mRotationAxis = rotationAxis;
-
-        // Angle error: negative by how much the body leans past the cone. A positive impulse about
-        // the rotation axis reduces it.
-        const decimal positionError = settings.maxAngle - angle;
-
-        const AxisConstraintBody world = makeWorldBody();
-        const AxisConstraintBody body = makeBody(constraint);
-        if (settings.spring.isSoft()) {
-            // Torsion spring-damper pulling the body back to the cone (bias handles the position error)
-            constraint.mPart.computeSpringConstraintProperties(mTimeStep, world, body, rotationAxis, positionError, settings.spring);
         }
         else {
-            // Hard stop: no bias here, the position error is corrected in solvePositionConstraint()
-            constraint.mPart.computeConstraintProperties(world, body, rotationAxis);
+            constraint.mRotationAxis = rotationAxis;
+
+            // Angle error: negative by how much the body leans past the cone. A positive impulse
+            // about the rotation axis reduces it.
+            const decimal positionError = settings.maxAngle - angle;
+
+            if (settings.spring.isSoft()) {
+                // Torsion spring-damper pulling the body back to the cone (bias handles the position error)
+                constraint.mPart.computeSpringConstraintProperties(mTimeStep, world, body, rotationAxis, positionError, settings.spring);
+            }
+            else {
+                // Hard stop: no bias here, the position error is corrected in solvePositionConstraint()
+                constraint.mPart.computeConstraintProperties(world, body, rotationAxis);
+            }
+        }
+
+        // ---------- Spin damping: slow the rotation about the body axis ---------- //
+
+        if (settings.spinDamping > decimal(0.0)) {
+
+            // A pure damper: torque = -c w about the body axis, with c = spinDamping * I_eff so the
+            // spin decays at the requested rate whatever the inertia. I_eff = 1 / (n . I^-1 n) is
+            // what the part computes as its effective mass for a hard constraint, so ask it first.
+            constraint.mSpinAxis = orientation * settings.localAxis;
+            const decimal inverseEffectiveInertia = constraint.mSpinAxis.dot((*body.inverseInertiaTensorWorld) * constraint.mSpinAxis);
+            if (inverseEffectiveInertia > MACHINE_EPSILON) {
+                const decimal dampingCoefficient = settings.spinDamping / inverseEffectiveInertia;
+                constraint.mSpinDampingPart.computeSpringConstraintProperties(mTimeStep, world, body, constraint.mSpinAxis, decimal(0.0),
+                                                                              SpringSettings::fromStiffnessAndDamping(decimal(0.0), dampingCoefficient));
+            }
+            else {
+                constraint.mSpinDampingPart.deactivate();
+            }
+        }
+        else {
+            constraint.mSpinDampingPart.deactivate();
         }
 
         if (!mIsWarmStartingActive) {
             constraint.mPart.resetTotalLambda();
+            constraint.mSpinDampingPart.resetTotalLambda();
         }
     }
 }
@@ -150,11 +177,12 @@ void SolveUprightConstraintSystem::warmstart() {
     for (uint64 c = 0; c < nbConstraints; c++) {
 
         UprightConstraint& constraint = *mConstraints[c];
-        if (!constraint.mIsActiveThisStep || !constraint.mPart.isActive()) continue;
+        if (!constraint.mIsActiveThisStep) continue;
 
         const AxisConstraintBody world = makeWorldBody();
         const AxisConstraintBody body = makeBody(constraint);
         constraint.mPart.warmStart(world, body);
+        constraint.mSpinDampingPart.warmStart(world, body);
     }
 }
 
@@ -165,18 +193,25 @@ void SolveUprightConstraintSystem::solveVelocityConstraint() {
     for (uint64 c = 0; c < nbConstraints; c++) {
 
         UprightConstraint& constraint = *mConstraints[c];
-        if (!constraint.mIsActiveThisStep || !constraint.mPart.isActive()) continue;
+        if (!constraint.mIsActiveThisStep) continue;
 
         const AxisConstraintBody world = makeWorldBody();
         const AxisConstraintBody body = makeBody(constraint);
 
-        if (constraint.mPart.isSoft()) {
-            // A spring-damper acts both ways: it also damps the swing back to upright
-            constraint.mPart.solveVelocityConstraint(world, body, DECIMAL_SMALLEST, DECIMAL_LARGEST);
+        if (constraint.mPart.isActive()) {
+            if (constraint.mPart.isSoft()) {
+                // A spring-damper acts both ways: it also damps the swing back to upright
+                constraint.mPart.solveVelocityConstraint(world, body, DECIMAL_SMALLEST, DECIMAL_LARGEST);
+            }
+            else {
+                // A hard cone only ever pushes the body back inside, never holds it against the edge
+                constraint.mPart.solveVelocityConstraint(world, body, decimal(0.0), DECIMAL_LARGEST);
+            }
         }
-        else {
-            // A hard cone only ever pushes the body back inside, never holds it against the edge
-            constraint.mPart.solveVelocityConstraint(world, body, decimal(0.0), DECIMAL_LARGEST);
+
+        // The spin damper resists the spin either way round
+        if (constraint.mSpinDampingPart.isActive()) {
+            constraint.mSpinDampingPart.solveVelocityConstraint(world, body, DECIMAL_SMALLEST, DECIMAL_LARGEST);
         }
     }
 }

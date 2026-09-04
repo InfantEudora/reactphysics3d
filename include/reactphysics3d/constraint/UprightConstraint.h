@@ -66,11 +66,20 @@ struct UprightConstraintSettings {
         /// and damping ratio relative to the effective inertia of the body.
         SpringSettings spring;
 
+        /// Damping of the spin about the body axis (yaw), as a rate in 1/s: dw/dt = -spinDamping * w
+        /// for the component of the angular velocity along the body axis. 0 (default) leaves the
+        /// spin alone; 1 halves it in about 0.7 s. Independent of the inertia of the body, solved
+        /// implicitly so any value is stable. Rotation about the other axes is not touched, so it
+        /// does not interfere with the righting spring; use RigidBody::setAngularDamping() to damp
+        /// all axes instead.
+        decimal spinDamping;
+
         // -------------------- Methods -------------------- //
 
         /// Constructor
         UprightConstraintSettings()
-            : localAxis(0, 1, 0), worldAxis(0, 1, 0), maxAngle(decimal(30.0) * PI_RP3D / decimal(180.0)), spring() {}
+            : localAxis(0, 1, 0), worldAxis(0, 1, 0), maxAngle(decimal(30.0) * PI_RP3D / decimal(180.0)), spring(),
+              spinDamping(decimal(0.0)) {}
 };
 
 // Class UprightConstraint
@@ -113,6 +122,12 @@ class UprightConstraint {
 
         /// The angular constraint doing the work
         AngularAxisConstraintPart mPart;
+
+        /// Body axis in world space (as of the last step), the axis the spin damping acts about
+        Vector3 mSpinAxis;
+
+        /// The optional damper on the spin about the body axis
+        AngularAxisConstraintPart mSpinDampingPart;
 
         /// Index of the body in the rigid body components (valid for the current step only)
         uint32 mBodyComponentIndex;
@@ -165,14 +180,23 @@ class UprightConstraint {
         /// Set the spring settings (default-constructed for a hard cone)
         void setSpringSettings(const SpringSettings& spring);
 
+        /// Return the spin damping rate (1/s)
+        decimal getSpinDamping() const;
+
+        /// Set the spin damping rate (1/s, >= 0, 0 for none)
+        void setSpinDamping(decimal spinDamping);
+
         /// Return the current angle (rad) between the body axis and the world axis
         decimal getCurrentAngle() const;
 
-        /// Return true if the constraint applied an impulse this step (the body is outside the cone)
+        /// Return true if the constraint applied a righting impulse this step (the body is outside the cone)
         bool isActive() const;
 
         /// Return the torque (N.m) applied to the body this step to right it, in world space
         Vector3 getReactionTorque(decimal timeStep) const;
+
+        /// Return the torque (N.m) the spin damping applied to the body this step, in world space
+        Vector3 getSpinDampingTorque(decimal timeStep) const;
 
         // -------------------- Friendship -------------------- //
 
@@ -224,6 +248,16 @@ RP3D_FORCE_INLINE const SpringSettings& UprightConstraint::getSpringSettings() c
 // Set the spring settings
 RP3D_FORCE_INLINE void UprightConstraint::setSpringSettings(const SpringSettings& spring) {
     mSettings.spring = spring;
+}
+
+// Return the spin damping rate
+RP3D_FORCE_INLINE decimal UprightConstraint::getSpinDamping() const {
+    return mSettings.spinDamping;
+}
+
+// Set the spin damping rate
+RP3D_FORCE_INLINE void UprightConstraint::setSpinDamping(decimal spinDamping) {
+    mSettings.spinDamping = std::max(decimal(0.0), spinDamping);
 }
 
 // Return the current angle between the body axis and the world axis

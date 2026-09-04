@@ -73,6 +73,7 @@ class UprightScene : public SceneDemo {
         float mConeAngleDeg;     // hard cone half angle
         float mFrequency;        // soft spring frequency (Hz)
         float mDampingRatio;     // soft spring damping ratio
+        float mSpinDamping;      // spin damping rate (1/s) applied to both
 
         nanogui::Label* mHardLabel;
         nanogui::Label* mSoftLabel;

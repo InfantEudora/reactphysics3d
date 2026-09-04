@@ -53,7 +53,7 @@ UprightScene::UprightScene(const std::string& name, EngineSettings& settings, re
       : SceneDemo(name, settings, physicsCommon, true),
         mHardBody(nullptr), mSoftBody(nullptr), mHardMast(nullptr), mSoftMast(nullptr),
         mHardConstraint(nullptr), mSoftConstraint(nullptr),
-        mConeAngleDeg(30.0f), mFrequency(1.0f), mDampingRatio(0.3f),
+        mConeAngleDeg(30.0f), mFrequency(1.0f), mDampingRatio(0.3f), mSpinDamping(0.0f),
         mHardLabel(nullptr), mSoftLabel(nullptr) {
 
     // Compute the radius and the center of the scene
@@ -175,9 +175,11 @@ void UprightScene::applySettings() {
 
     if (mHardConstraint) {
         mHardConstraint->setMaxAngle(mConeAngleDeg * DEG);
+        mHardConstraint->setSpinDamping(mSpinDamping);
     }
     if (mSoftConstraint) {
         mSoftConstraint->setSpringSettings(rp3d::SpringSettings::fromFrequencyAndDampingRatio(mFrequency, mDampingRatio));
+        mSoftConstraint->setSpinDamping(mSpinDamping);
     }
 }
 
@@ -301,7 +303,7 @@ void UprightScene::createGuiWidgets(nanogui::Widget* parent) {
         label->set_fixed_width(230);   // wraps
         return label;
     };
-    addText("Two ships in zero gravity, each on an UprightConstraint. Yaw is always free; only the tilt of the mast is constrained.");
+    addText("Two ships in zero gravity, each on an UprightConstraint. Only the tilt of the mast is constrained; yaw is free unless the spin damping slider is up, which slows the spin about the mast at that rate.");
     addText("Left: a hard cone. It may tilt up to the cone angle and is stopped there.");
     addText("Right: a soft spring with a zero cone. It banks under a kick and springs back upright.");
 
@@ -334,6 +336,7 @@ void UprightScene::createGuiWidgets(nanogui::Widget* parent) {
     addSlider("Hard cone angle (deg)", mConeAngleDeg, 0.0f, 90.0f, 0);
     addSlider("Soft frequency (Hz)", mFrequency, 0.2f, 4.0f, 2);
     addSlider("Soft damping ratio", mDampingRatio, 0.0f, 2.0f, 2);
+    addSlider("Spin damping (1/s), both", mSpinDamping, 0.0f, 3.0f, 2);
 
     Button* roll = new Button(parent, "Kick roll (K)");
     roll->set_callback([this] { kick(rp3d::Vector3(0, 0, KICK_RATE)); });

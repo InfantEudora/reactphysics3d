@@ -140,6 +140,7 @@ class TestUprightConstraint : public Test {
             testHardConeLeavesYawFree();
             testSoftReturnsUpright();
             testSoftInsideConeIsFree();
+            testSpinDamping();
             testDestroyBodyDestroysConstraint();
         }
 
@@ -319,6 +320,49 @@ class TestUprightConstraint : public Test {
             mBody->setTransform(Transform(Vector3(0, 0, 0), Quaternion::fromEulerAngles(0, 0, 40 * DEG)));
             step(240);
             rp3d_test(tilt() < 20 * DEG + decimal(1.0) * DEG);
+
+            destroyScene();
+        }
+
+        /// Spin damping slows the rotation about the body axis at the requested rate, whatever the
+        /// inertia, and leaves the tilt alone
+        void testSpinDamping() {
+            UprightConstraintSettings settings;
+            settings.maxAngle = 30 * DEG;
+            settings.spinDamping = decimal(1.0);
+            createScene(decimal(0.0), settings);
+            rp3d_test(approxEqual(mConstraint->getSpinDamping(), decimal(1.0)));
+
+            // dw/dt = -k w integrated implicitly: w(n) = w0 / (1 + k dt)^n, close to w0 e^(-k t)
+            mBody->setAngularVelocity(Vector3(0, 3, 0));
+            step(60);
+            const decimal expected = decimal(3.0) / std::pow(decimal(1.0) + TIME_STEP, decimal(60.0));
+            rp3d_test(std::abs(mBody->getAngularVelocity().y - expected) < expected * decimal(0.02));
+            rp3d_test(std::abs(expected - decimal(3.0) * std::exp(decimal(-1.0))) < decimal(0.02));
+            // The damping torque opposes the spin
+            rp3d_test(mConstraint->getSpinDampingTorque(TIME_STEP).y < decimal(0.0));
+            rp3d_test(!mConstraint->isActive());
+
+            // Twice the rate, half the time constant: same decay after half the steps
+            mConstraint->setSpinDamping(decimal(2.0));
+            mBody->setAngularVelocity(Vector3(0, 3, 0));
+            step(30);
+            rp3d_test(std::abs(mBody->getAngularVelocity().y - expected) < expected * decimal(0.03));
+
+            // A tilted body inside the cone is not righted: only the spin about its own axis is
+            // damped, the component of the angular velocity across it (which makes the body
+            // nutate) is left alone
+            destroyScene();
+            settings.spinDamping = decimal(1.0);
+            createScene(20 * DEG, settings);
+            mBody->setAngularVelocity(Vector3(0, 2, 0));
+            step(120);
+            const Vector3 bodyAxis = mBody->getTransform().getOrientation() * Vector3(0, 1, 0);
+            const decimal spin = mBody->getAngularVelocity().dot(bodyAxis);
+            rp3d_test(std::abs(spin) < decimal(2.0) * std::cos(20 * DEG) * std::exp(decimal(-2.0)) * decimal(1.2));
+            rp3d_test(mBody->getAngularVelocity().length() > decimal(0.5));
+            // The nutation may carry it to the cone edge, but never past it
+            rp3d_test(tilt() > 10 * DEG && tilt() < 30 * DEG + decimal(0.5) * DEG);
 
             destroyScene();
         }

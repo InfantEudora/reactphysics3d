@@ -33,12 +33,23 @@ using namespace reactphysics3d;
 // Constructor
 UprightConstraint::UprightConstraint(PhysicsWorld& world, RigidBody* body, const UprightConstraintSettings& settings)
                   : mWorld(world), mBody(body), mSettings(settings), mCosMaxAngle(decimal(0.0)), mCurrentAngle(decimal(0.0)),
-                    mRotationAxis(1, 0, 0), mBodyComponentIndex(0), mIsActiveThisStep(false) {
+                    mRotationAxis(1, 0, 0), mSpinAxis(0, 1, 0), mBodyComponentIndex(0), mIsActiveThisStep(false) {
 
     assert(body != nullptr);
     mSettings.localAxis = settings.localAxis.getUnit();
     mSettings.worldAxis = settings.worldAxis.getUnit();
     setMaxAngle(settings.maxAngle);
+    setSpinDamping(settings.spinDamping);
+}
+
+// Return the torque the spin damping applied to the body this step
+/**
+ * @param timeStep The time step of the last simulation step
+ * @return The angular impulse of the damper divided by the time step, along the body axis (N.m)
+ */
+Vector3 UprightConstraint::getSpinDampingTorque(decimal timeStep) const {
+    assert(timeStep > MACHINE_EPSILON);
+    return mSpinAxis * (mSpinDampingPart.getTotalLambda() / timeStep);
 }
 
 // Return the torque applied to the body this step to right it
