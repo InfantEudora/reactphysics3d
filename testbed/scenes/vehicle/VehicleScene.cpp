@@ -65,7 +65,7 @@ static rp3d::Quaternion rotationWithZAlong(const rp3d::Vector3& dir) {
 VehicleScene::VehicleScene(const std::string& name, EngineSettings& settings, reactphysics3d::PhysicsCommon& physicsCommon)
       : SceneDemo(name, settings, physicsCommon, true),
         mFloor(nullptr), mRamp(nullptr), mChassis(nullptr), mVehicle(nullptr),
-        mFrequency(1.5f), mDampingRatio(0.5f), mMassKg(1000.0f),
+        mFrequency(1.5f), mDampingRatio(0.5f), mMassKg(1000.0f), mTireFriction(1.0f),
         mStatusLabel(nullptr) {
 
     for (int i = 0; i < NB_WHEELS; i++) {
@@ -218,7 +218,10 @@ void VehicleScene::applySettings() {
     if (mVehicle == nullptr || mChassis == nullptr) return;
 
     for (rp3d::uint32 i = 0; i < mVehicle->getNbWheels(); i++) {
-        mVehicle->getWheel(i).getSettings().suspensionSpring = rp3d::SpringSettings::fromFrequencyAndDampingRatio(mFrequency, mDampingRatio);
+        rp3d::VehicleWheelSettings& wheel = mVehicle->getWheel(i).getSettings();
+        wheel.suspensionSpring = rp3d::SpringSettings::fromFrequencyAndDampingRatio(mFrequency, mDampingRatio);
+        wheel.longitudinalFriction = mTireFriction;
+        wheel.lateralFriction = mTireFriction;
     }
     setBoxMass(mChassis, mMassKg);
 }
@@ -251,6 +254,14 @@ void VehicleScene::updateVisuals() {
             spanBox(mStrutVisuals[i], anchor, center, 0.08f);
         }
     }
+}
+
+// Add a velocity (chassis local axes) to the chassis
+void VehicleScene::push(const rp3d::Vector3& localVelocity) {
+
+    if (mChassis == nullptr) return;
+    rp3d::RigidBody* body = mChassis->getRigidBody();
+    body->setLinearVelocity(body->getLinearVelocity() + body->getTransform().getOrientation() * localVelocity);
 }
 
 // Teleport the chassis to a pose at rest
@@ -292,11 +303,15 @@ void VehicleScene::update() {
             std::ostringstream line;
             line << (i < 2 ? "Front " : "Rear ") << (i % 2 == 0 ? "left" : "right") << ": ";
             if (wheel.hasContact()) {
-                line << std::fixed << std::setprecision(3) << wheel.getSuspensionLength() << " m, "
-                     << std::setprecision(0) << (wheel.getSuspensionImpulse() / timeStep) << " N";
+                line << std::fixed << std::setprecision(3) << wheel.getSuspensionLength() << " m"
+                     << (wheel.hasHitHardStop() ? " (stop)" : "") << ", "
+                     << std::setprecision(0) << "N " << (wheel.getNormalImpulse() / timeStep)
+                     << ", F " << (wheel.getLongitudinalImpulse() / timeStep)
+                     << ", S " << (wheel.getLateralImpulse() / timeStep)
+                     << std::setprecision(1) << ", v " << (wheel.getAngularVelocity() * wheel.getSettings().radius);
             }
             else {
-                line << "in the air";
+                line << "in the air, v " << std::fixed << std::setprecision(1) << (wheel.getAngularVelocity() * wheel.getSettings().radius);
             }
             mWheelLabels[i]->set_caption(line.str());
         }
@@ -319,10 +334,13 @@ bool VehicleScene::keyboardEvent(int key, int scancode, int action, int mods) {
             placeChassis(rp3d::Vector3(RAMP_X, DROP_HEIGHT + 1.0f, 0), rp3d::Quaternion::fromEulerAngles(0, 0, RAMP_ANGLE_DEG * DEG));
             return true;
         case GLFW_KEY_K:
-            if (mChassis) {
-                rp3d::RigidBody* body = mChassis->getRigidBody();
-                body->setLinearVelocity(body->getLinearVelocity() + rp3d::Vector3(0, -PUSH_SPEED, 0));
-            }
+            push(rp3d::Vector3(0, -PUSH_SPEED, 0));
+            return true;
+        case GLFW_KEY_F:
+            push(rp3d::Vector3(0, 0, PUSH_SPEED));
+            return true;
+        case GLFW_KEY_S:
+            push(rp3d::Vector3(PUSH_SPEED, 0, 0));
             return true;
         default:
             return false;
@@ -340,14 +358,17 @@ void VehicleScene::createGuiWidgets(nanogui::Widget* parent) {
         label->set_fixed_width(230);   // wraps
         return label;
     };
-    addText("A chassis on a VehicleConstraint: four raycast wheels, each a spring-damper along its contact normal. The spheres and struts are cosmetic.");
-    addText("Suspension only so far: no tire friction, steering or drive. On the ramp the car slides.");
+    addText("A chassis on a VehicleConstraint: four raycast wheels, each a spring-damper along its contact normal with a hard stop, plus tire friction along and across the rolling direction. The spheres and struts are cosmetic.");
+    addText("No steering or drive yet: the wheels roll freely, so on the ramp the car rolls down.");
+    addText("Per wheel: suspension length, normal (N), forward (F) and sideways (S) force in newtons, wheel surface speed v in m/s.");
 
     new Label(parent, "Keys", "sans-bold");
     addText("D : drop the car flat");
     addText("T : drop it rolled 20 degrees");
     addText("N : drop it on the ramp");
     addText("K : push it down");
+    addText("F : push it forward (rolls on)");
+    addText("S : push it sideways (tires stop it)");
 
     new Label(parent, "Suspension", "sans-bold");
 
@@ -373,6 +394,7 @@ void VehicleScene::createGuiWidgets(nanogui::Widget* parent) {
     addSlider("Frequency (Hz)", mFrequency, 0.5f, 4.0f, 2);
     addSlider("Damping ratio", mDampingRatio, 0.0f, 2.0f, 2);
     addSlider("Chassis mass (kg)", mMassKg, 200.0f, 3000.0f, 0);
+    addSlider("Tire friction", mTireFriction, 0.0f, 2.0f, 2);
 
     Button* drop = new Button(parent, "Drop flat (D)");
     drop->set_callback([this] { placeChassis(rp3d::Vector3(0, DROP_HEIGHT, 0), rp3d::Quaternion::identity()); });
@@ -384,7 +406,9 @@ void VehicleScene::createGuiWidgets(nanogui::Widget* parent) {
     mStatusLabel = new Label(parent, "Suspension force vs weight");
     mStatusLabel->set_fixed_width(230);
     for (int i = 0; i < NB_WHEELS; i++) {
-        mWheelLabels[i] = new Label(parent, "");
+        // Non-empty from the start: nanogui lays an empty label out with zero height and does
+        // not grow it when the caption changes later
+        mWheelLabels[i] = new Label(parent, std::string(i < 2 ? "Front " : "Rear ") + (i % 2 == 0 ? "left" : "right") + ": -");
         mWheelLabels[i]->set_fixed_width(230);
     }
 }

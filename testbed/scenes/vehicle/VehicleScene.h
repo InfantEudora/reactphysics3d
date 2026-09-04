@@ -46,9 +46,10 @@ const int NB_WHEELS = 4;
  * A four-wheeled chassis on a VehicleConstraint (raycast wheel suspension). The wheels are
  * rays, not bodies: the spheres and struts are cosmetic and follow what the constraint reports.
  *
- * Suspension only for now (no friction, steering or drive): drop the car flat or tilted, push
- * it down, drop it onto the ramp, and tune frequency, damping and mass live. The status lines
- * show each wheel's suspension length and force and the total against the weight.
+ * Suspension and tire friction, no steering or drive yet: drop the car flat or tilted, push it
+ * down, forward or sideways, drop it onto the ramp, and tune frequency, damping, mass and tire
+ * friction live. The status lines show each wheel's suspension length and normal, longitudinal
+ * and lateral forces, and the total normal force against the weight.
  */
 class VehicleScene : public SceneDemo {
 
@@ -85,6 +86,7 @@ class VehicleScene : public SceneDemo {
         float mFrequency;        // Hz
         float mDampingRatio;     // 1 = critical
         float mMassKg;
+        float mTireFriction;     // longitudinal and lateral friction coefficient
 
         nanogui::Label* mStatusLabel;
         nanogui::Label* mWheelLabels[NB_WHEELS];   // one line per wheel (nanogui labels do not wrap on newlines)
@@ -113,6 +115,9 @@ class VehicleScene : public SceneDemo {
 
         /// Stretch a cosmetic box between two world points
         static void spanBox(Box* box, const rp3d::Vector3& from, const rp3d::Vector3& to, float thickness);
+
+        /// Add a velocity (chassis local axes) to the chassis
+        void push(const rp3d::Vector3& localVelocity);
 
         /// Teleport the chassis to a pose at rest
         void placeChassis(const rp3d::Vector3& position, const rp3d::Quaternion& orientation);
@@ -145,7 +150,7 @@ class VehicleScene : public SceneDemo {
         /// Scene panel controls
         virtual void createGuiWidgets(nanogui::Widget* parent) override;
 
-        /// Keys: D drop, T tilted drop, K push down, N drop on the ramp
+        /// Keys: D drop, T tilted drop, K push down, N drop on the ramp, F push forward, S push sideways
         virtual bool keyboardEvent(int key, int scancode, int action, int mods) override;
 };
 
