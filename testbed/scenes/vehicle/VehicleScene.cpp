@@ -64,9 +64,9 @@ static rp3d::Quaternion rotationWithZAlong(const rp3d::Vector3& dir) {
 // Constructor
 VehicleScene::VehicleScene(const std::string& name, EngineSettings& settings, reactphysics3d::PhysicsCommon& physicsCommon)
       : SceneDemo(name, settings, physicsCommon, true),
-        mFloor(nullptr), mRamp(nullptr), mChassis(nullptr), mVehicle(nullptr),
+        mFloor(nullptr), mRamp(nullptr), mChassis(nullptr), mVehicle(nullptr), mRollOverLimiter(nullptr),
         mFrequency(1.5f), mDampingRatio(0.5f), mMassKg(1000.0f), mTireFriction(1.0f),
-        mEngineTorque(600.0f), mBrakeTorque(1500.0f), mMaxSteerDeg(30.0f),
+        mEngineTorque(600.0f), mBrakeTorque(1500.0f), mMaxSteerDeg(30.0f), mUseRollOverLimiter(false),
         mThrottle(0.0f), mSteerInput(0.0f), mBraking(false),
         mLastChassisPosition(0, SPAWN_HEIGHT, 0),
         mStatusLabel(nullptr) {
@@ -118,6 +118,7 @@ void VehicleScene::destroyPhysicsWorld() {
         mPhysicsObjects.clear();
         mFloor = mRamp = mChassis = nullptr;
         mVehicle = nullptr;
+        mRollOverLimiter = nullptr;
         for (int i = 0; i < NB_WHEELS; i++) {
             mWheelVisuals[i] = nullptr;
             mStrutVisuals[i] = nullptr;
@@ -208,6 +209,7 @@ void VehicleScene::createScene() {
         mVehicle->addWheel(wheel);
     }
     applySettings();
+    applyRollOverLimiter();
 
     // Cosmetic wheels (flat boxes so the spin shows, no collider) and struts
     for (int i = 0; i < NB_WHEELS; i++) {
@@ -234,6 +236,24 @@ void VehicleScene::applySettings() {
         wheel.maxSteerAngle = mMaxSteerDeg * DEG;
     }
     setBoxMass(mChassis, mMassKg);
+}
+
+// Create or destroy the roll-over limiter to match the checkbox
+void VehicleScene::applyRollOverLimiter() {
+
+    if (mChassis == nullptr || mPhysicsWorld == nullptr) return;
+
+    if (mUseRollOverLimiter && mRollOverLimiter == nullptr) {
+        // An arcade safety net: the chassis up axis may lean at most 45 degrees from world up,
+        // a hard cone with no spring. Yaw (steering) is untouched.
+        rp3d::UprightConstraintSettings settings;
+        settings.maxAngle = 45.0f * DEG;
+        mRollOverLimiter = mPhysicsWorld->createUprightConstraint(mChassis->getRigidBody(), settings);
+    }
+    else if (!mUseRollOverLimiter && mRollOverLimiter != nullptr) {
+        mPhysicsWorld->destroyUprightConstraint(mRollOverLimiter);
+        mRollOverLimiter = nullptr;
+    }
 }
 
 // Turn the current key inputs into wheel torques and steer angles
@@ -452,6 +472,13 @@ void VehicleScene::createGuiWidgets(nanogui::Widget* parent) {
     addSlider("Engine torque per wheel (Nm)", mEngineTorque, 0.0f, 3000.0f, 0);
     addSlider("Brake torque per wheel (Nm)", mBrakeTorque, 0.0f, 5000.0f, 0);
     addSlider("Steering lock (deg)", mMaxSteerDeg, 5.0f, 45.0f, 0);
+
+    CheckBox* limiter = new CheckBox(parent, "Roll-over limiter (45 deg cone)");
+    limiter->set_checked(mUseRollOverLimiter);
+    limiter->set_callback([this](bool checked) {
+        mUseRollOverLimiter = checked;
+        applyRollOverLimiter();
+    });
 
     Button* drop = new Button(parent, "Drop flat (D)");
     drop->set_callback([this] { placeChassis(rp3d::Vector3(mLastChassisPosition.x, DROP_HEIGHT, mLastChassisPosition.z), rp3d::Quaternion::identity()); });

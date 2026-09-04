@@ -52,6 +52,7 @@
 #include "crane/CraneScene.h"
 #include "spring/SpringScene.h"
 #include "vehicle/VehicleScene.h"
+#include "upright/UprightScene.h"
 
 using namespace openglframework;
 using namespace jointsscene;
@@ -75,6 +76,7 @@ using namespace sliderjointscene;
 using namespace cranescene;
 using namespace springscene;
 using namespace vehiclescene;
+using namespace uprightscene;
 using namespace ragdollscene;
 using namespace ropescene;
 
@@ -396,6 +398,12 @@ void TestbedApplication::createScenes() {
     mLogger.addFileDestination(sceneName, logLevel, rp3d::DefaultLogger::Format::HTML);
     VehicleScene* vehicleScene = new VehicleScene(sceneName, mDefaultEngineSettings, mPhysicsCommon);
     mScenes.push_back(vehicleScene);
+
+    // Upright scene (UprightConstraint: hard cone vs self-righting spring, in zero gravity)
+    sceneName = "Upright";
+    mLogger.addFileDestination(sceneName, logLevel, rp3d::DefaultLogger::Format::HTML);
+    UprightScene* uprightScene = new UprightScene(sceneName, mDefaultEngineSettings, mPhysicsCommon);
+    mScenes.push_back(uprightScene);
 
     // Ragdoll scene
     sceneName = "Ragdoll";

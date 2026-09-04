@@ -32,7 +32,7 @@
 #include "Box.h"
 #include "SceneDemo.h"
 
-namespace nanogui { class Slider; class Label; }
+namespace nanogui { class Slider; class Label; class CheckBox; }
 
 namespace vehiclescene {
 
@@ -81,6 +81,7 @@ class VehicleScene : public SceneDemo {
         Box* mRamp;
         Box* mChassis;
         rp3d::VehicleConstraint* mVehicle;
+        rp3d::UprightConstraint* mRollOverLimiter;   // optional hard 45 degree cone on the chassis
         Box* mWheelVisuals[NB_WHEELS];      // cosmetic
         Box* mStrutVisuals[NB_WHEELS];      // cosmetic
 
@@ -92,6 +93,7 @@ class VehicleScene : public SceneDemo {
         float mEngineTorque;     // N.m per driven (rear) wheel at full throttle
         float mBrakeTorque;      // N.m per wheel when braking
         float mMaxSteerDeg;      // steering lock of the front wheels
+        bool mUseRollOverLimiter;
 
         /// Driver inputs from the keys
         float mThrottle;         // -1, 0 or 1
@@ -125,6 +127,9 @@ class VehicleScene : public SceneDemo {
 
         /// Turn the current key inputs into wheel torques and steer angles
         void applyDriverInputs();
+
+        /// Create or destroy the roll-over limiter to match the checkbox
+        void applyRollOverLimiter();
 
         /// Move the cosmetic wheels and struts to where the constraint says they are
         void updateVisuals();

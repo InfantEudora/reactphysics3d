@@ -133,6 +133,8 @@ set(SCENES_SOURCES
     scenes/spring/SpringScene.cpp
     scenes/vehicle/VehicleScene.h
     scenes/vehicle/VehicleScene.cpp
+    scenes/upright/UprightScene.h
+    scenes/upright/UprightScene.cpp
     scenes/ballandsocketjointsnet/BallAndSocketJointsNetScene.h
     scenes/ballandsocketjointsnet/BallAndSocketJointsNetScene.cpp
     scenes/ballandsocketjointschain/BallAndSocketJointsChainScene.h
