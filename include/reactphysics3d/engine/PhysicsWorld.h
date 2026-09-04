@@ -41,6 +41,7 @@
 #include <reactphysics3d/components/FixedJointComponents.h>
 #include <reactphysics3d/components/HingeJointComponents.h>
 #include <reactphysics3d/components/SliderJointComponents.h>
+#include <reactphysics3d/components/SpringJointComponents.h>
 #include <reactphysics3d/collision/CollisionCallback.h>
 #include <reactphysics3d/collision/OverlapCallback.h>
 #include <reactphysics3d/configuration.h>
@@ -209,6 +210,9 @@ class PhysicsWorld {
 
         /// Slider joints Components
         SliderJointComponents mSliderJointsComponents;
+
+        /// Spring joints Components
+        SpringJointComponents mSpringJointsComponents;
 
         /// Reference to the collision detection
         CollisionDetectionSystem mCollisionDetection;
@@ -460,6 +464,7 @@ class PhysicsWorld {
         friend class FixedJoint;
         friend class HingeJoint;
         friend class SliderJoint;
+        friend class SpringJoint;
         friend class CollisionCallback::CallbackData;
         friend class OverlapCallback::CallbackData;
         friend class DebugRenderer;

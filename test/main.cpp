@@ -49,6 +49,7 @@
 #include "tests/containers/TestStack.h"
 #include "tests/engine/TestRigidBody.h"
 #include "tests/constraint/TestAxisConstraintPart.h"
+#include "tests/constraint/TestSpringJoint.h"
 #include "tests/systems/TestDynamicSystem.h"
 #include "tests/utils/TestQuickHull.h"
 
@@ -101,6 +102,7 @@ int main() {
     // ---------- Constraint tests ---------- //
 
     testSuite.addTest(new TestAxisConstraintPart("AxisConstraintPart"));
+    testSuite.addTest(new TestSpringJoint("SpringJoint"));
 
     // Run the tests
     testSuite.run();

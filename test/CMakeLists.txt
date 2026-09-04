@@ -32,6 +32,7 @@ set (RP3D_TESTS_HEADERS
     "tests/mathematics/TestVector3.h"
     "tests/engine/TestRigidBody.h"
     "tests/constraint/TestAxisConstraintPart.h"
+    "tests/constraint/TestSpringJoint.h"
     "tests/systems/TestDynamicSystem.h"
     "tests/utils/TestQuickHull.h"
 )

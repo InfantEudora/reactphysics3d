@@ -28,6 +28,7 @@
 #include <reactphysics3d/engine/PhysicsWorld.h>
 #include <reactphysics3d/constraint/BallAndSocketJoint.h>
 #include <reactphysics3d/constraint/SliderJoint.h>
+#include <reactphysics3d/constraint/SpringJoint.h>
 #include <reactphysics3d/constraint/HingeJoint.h>
 #include <reactphysics3d/constraint/FixedJoint.h>
 #include <reactphysics3d/utils/Profiler.h>
@@ -62,7 +63,7 @@ PhysicsWorld::PhysicsWorld(MemoryManager& memoryManager, PhysicsCommon& physicsC
                 mTransformComponents(mMemoryManager.getHeapAllocator()), mCollidersComponents(mMemoryManager.getHeapAllocator()),
                 mJointsComponents(mMemoryManager.getHeapAllocator()), mBallAndSocketJointsComponents(mMemoryManager.getHeapAllocator()),
                 mFixedJointsComponents(mMemoryManager.getHeapAllocator()), mHingeJointsComponents(mMemoryManager.getHeapAllocator()),
-                mSliderJointsComponents(mMemoryManager.getHeapAllocator()), mCollisionDetection(this, mCollidersComponents, mTransformComponents, mBodyComponents, mRigidBodyComponents,
+                mSliderJointsComponents(mMemoryManager.getHeapAllocator()), mSpringJointsComponents(mMemoryManager.getHeapAllocator()), mCollisionDetection(this, mCollidersComponents, mTransformComponents, mBodyComponents, mRigidBodyComponents,
                                         mMemoryManager, physicsCommon.mTriangleShapeHalfEdgeStructure),
                 mCollisionBodies(mMemoryManager.getHeapAllocator()), mEventListener(nullptr),
                 mName(worldSettings.worldName),  mIslands(mMemoryManager.getSingleFrameAllocator()), mProcessContactPairsOrderIslands(mMemoryManager.getSingleFrameAllocator()),
@@ -70,7 +71,7 @@ PhysicsWorld::PhysicsWorld(MemoryManager& memoryManager, PhysicsCommon& physicsC
                                mCollidersComponents, mConfig.restitutionVelocityThreshold),
                 mConstraintSolverSystem(*this, mIslands, mRigidBodyComponents, mTransformComponents, mJointsComponents,
                                         mBallAndSocketJointsComponents, mFixedJointsComponents, mHingeJointsComponents,
-                                        mSliderJointsComponents),
+                                        mSliderJointsComponents, mSpringJointsComponents),
                 mDynamicsSystem(*this, mBodyComponents, mRigidBodyComponents, mTransformComponents, mCollidersComponents, mIsGravityEnabled, mConfig.gravity),
                 mNbVelocitySolverIterations(mConfig.defaultVelocitySolverNbIterations),
                 mNbPositionSolverIterations(mConfig.defaultPositionSolverNbIterations), 
@@ -116,6 +117,7 @@ PhysicsWorld::PhysicsWorld(MemoryManager& memoryManager, PhysicsCommon& physicsC
     mFixedJointsComponents.init();
     mSliderJointsComponents.init();
     mHingeJointsComponents.init();
+    mSpringJointsComponents.init();
 
     RP3D_LOG(mConfig.worldName, Logger::Level::Information, Logger::Category::World,
              "Physics World: Physics world " + mName + " has been created",  __FILE__, __LINE__);
@@ -202,6 +204,9 @@ void PhysicsWorld::setJointDisabled(Entity jointEntity, bool isDisabled) {
     }
     if (mSliderJointsComponents.hasComponent(jointEntity)) {
         mSliderJointsComponents.setIsEntityDisabled(jointEntity, isDisabled);
+    }
+    if (mSpringJointsComponents.hasComponent(jointEntity)) {
+        mSpringJointsComponents.setIsEntityDisabled(jointEntity, isDisabled);
     }
 }
 
@@ -569,6 +574,24 @@ Joint* PhysicsWorld::createJoint(const JointInfo& jointInfo) {
             break;
         }
 
+        // Spring joint
+        case JointType::SPRINGJOINT:
+        {
+            const SpringJointInfo& info = static_cast<const SpringJointInfo&>(jointInfo);
+
+            // Create a SpringJoint component
+            SpringJointComponents::SpringJointComponent springJointComponent(info.restLength, info.springSettings);
+            mSpringJointsComponents.addComponent(entity, isJointDisabled, springJointComponent);
+
+            void* allocatedMemory = mMemoryManager.allocate(MemoryManager::AllocationType::Pool, sizeof(SpringJoint));
+            SpringJoint* joint = new (allocatedMemory) SpringJoint(entity, *this, info);
+
+            newJoint = joint;
+            mSpringJointsComponents.setJoint(entity, joint);
+
+            break;
+        }
+
         default:
         {
             assert(false);
@@ -645,6 +668,9 @@ void PhysicsWorld::destroyJoint(Joint* joint) {
     }
     if (mSliderJointsComponents.hasComponent(jointEntity)) {
         mSliderJointsComponents.removeComponent(jointEntity);
+    }
+    if (mSpringJointsComponents.hasComponent(jointEntity)) {
+        mSpringJointsComponents.removeComponent(jointEntity);
     }
     mEntityManager.destroyEntity(jointEntity);
 
