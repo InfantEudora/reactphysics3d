@@ -129,6 +129,8 @@ set(COMMON_SOURCES
 set(SCENES_SOURCES
     scenes/crane/CraneScene.h
     scenes/crane/CraneScene.cpp
+    scenes/spring/SpringScene.h
+    scenes/spring/SpringScene.cpp
     scenes/ballandsocketjointsnet/BallAndSocketJointsNetScene.h
     scenes/ballandsocketjointsnet/BallAndSocketJointsNetScene.cpp
     scenes/ballandsocketjointschain/BallAndSocketJointsChainScene.h

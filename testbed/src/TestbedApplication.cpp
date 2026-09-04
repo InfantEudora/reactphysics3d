@@ -50,6 +50,7 @@
 #include "ragdoll/RagdollScene.h"
 #include "rope/RopeScene.h"
 #include "crane/CraneScene.h"
+#include "spring/SpringScene.h"
 
 using namespace openglframework;
 using namespace jointsscene;
@@ -71,6 +72,7 @@ using namespace ballandsocketjointscene;
 using namespace hingejointscene;
 using namespace sliderjointscene;
 using namespace cranescene;
+using namespace springscene;
 using namespace ragdollscene;
 using namespace ropescene;
 
@@ -380,6 +382,12 @@ void TestbedApplication::createScenes() {
     mLogger.addFileDestination(sceneName, logLevel, rp3d::DefaultLogger::Format::HTML);
     CraneScene* craneScene = new CraneScene(sceneName, mDefaultEngineSettings, mPhysicsCommon);
     mScenes.push_back(craneScene);
+
+    // Spring scene (SpringJoint as tunable spring, spring chain and rigid rod)
+    sceneName = "Spring";
+    mLogger.addFileDestination(sceneName, logLevel, rp3d::DefaultLogger::Format::HTML);
+    SpringScene* springScene = new SpringScene(sceneName, mDefaultEngineSettings, mPhysicsCommon);
+    mScenes.push_back(springScene);
 
     // Ragdoll scene
     sceneName = "Ragdoll";
