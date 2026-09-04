@@ -29,6 +29,7 @@
 #include <reactphysics3d/constraint/BallAndSocketJoint.h>
 #include <reactphysics3d/constraint/SliderJoint.h>
 #include <reactphysics3d/constraint/SpringJoint.h>
+#include <reactphysics3d/constraint/VehicleConstraint.h>
 #include <reactphysics3d/constraint/HingeJoint.h>
 #include <reactphysics3d/constraint/FixedJoint.h>
 #include <reactphysics3d/utils/Profiler.h>
@@ -63,7 +64,7 @@ PhysicsWorld::PhysicsWorld(MemoryManager& memoryManager, PhysicsCommon& physicsC
                 mTransformComponents(mMemoryManager.getHeapAllocator()), mCollidersComponents(mMemoryManager.getHeapAllocator()),
                 mJointsComponents(mMemoryManager.getHeapAllocator()), mBallAndSocketJointsComponents(mMemoryManager.getHeapAllocator()),
                 mFixedJointsComponents(mMemoryManager.getHeapAllocator()), mHingeJointsComponents(mMemoryManager.getHeapAllocator()),
-                mSliderJointsComponents(mMemoryManager.getHeapAllocator()), mSpringJointsComponents(mMemoryManager.getHeapAllocator()), mCollisionDetection(this, mCollidersComponents, mTransformComponents, mBodyComponents, mRigidBodyComponents,
+                mSliderJointsComponents(mMemoryManager.getHeapAllocator()), mSpringJointsComponents(mMemoryManager.getHeapAllocator()), mVehicles(mMemoryManager.getHeapAllocator()), mCollisionDetection(this, mCollidersComponents, mTransformComponents, mBodyComponents, mRigidBodyComponents,
                                         mMemoryManager, physicsCommon.mTriangleShapeHalfEdgeStructure),
                 mCollisionBodies(mMemoryManager.getHeapAllocator()), mEventListener(nullptr),
                 mName(worldSettings.worldName),  mIslands(mMemoryManager.getSingleFrameAllocator()), mProcessContactPairsOrderIslands(mMemoryManager.getSingleFrameAllocator()),
@@ -71,7 +72,7 @@ PhysicsWorld::PhysicsWorld(MemoryManager& memoryManager, PhysicsCommon& physicsC
                                mCollidersComponents, mConfig.restitutionVelocityThreshold),
                 mConstraintSolverSystem(*this, mIslands, mRigidBodyComponents, mTransformComponents, mJointsComponents,
                                         mBallAndSocketJointsComponents, mFixedJointsComponents, mHingeJointsComponents,
-                                        mSliderJointsComponents, mSpringJointsComponents),
+                                        mSliderJointsComponents, mSpringJointsComponents, mVehicles),
                 mDynamicsSystem(*this, mBodyComponents, mRigidBodyComponents, mTransformComponents, mCollidersComponents, mIsGravityEnabled, mConfig.gravity),
                 mNbVelocitySolverIterations(mConfig.defaultVelocitySolverNbIterations),
                 mNbPositionSolverIterations(mConfig.defaultPositionSolverNbIterations), 
@@ -142,6 +143,11 @@ PhysicsWorld::~PhysicsWorld() {
     mProfiler->printReport();
 
 #endif
+
+    // Destroy all the vehicles that have not been removed
+    while (mVehicles.size() > 0) {
+        destroyVehicle(mVehicles[mVehicles.size() - 1]);
+    }
 
     // Destroy all the joints that have not been removed
     for (uint32 i=0; i < mJointsComponents.getNbComponents(); i++) {
@@ -464,6 +470,13 @@ void PhysicsWorld::destroyRigidBody(RigidBody* rigidBody) {
         destroyJoint(mJointsComponents.getJoint(joints[0]));
     }
 
+    // Destroy all the vehicles whose chassis is the rigid body to be destroyed
+    for (uint64 i = mVehicles.size(); i > 0; i--) {
+        if (mVehicles[i - 1]->getBody() == rigidBody) {
+            destroyVehicle(mVehicles[i - 1]);
+        }
+    }
+
     // Destroy the corresponding entity and its components
     mBodyComponents.removeComponent(rigidBody->getEntity());
     mRigidBodyComponents.removeComponent(rigidBody->getEntity());
@@ -681,6 +694,63 @@ void PhysicsWorld::destroyJoint(Joint* joint) {
     mMemoryManager.release(MemoryManager::AllocationType::Pool, joint, nbBytes);
 }
 
+
+// Create a vehicle constraint on a rigid body (the chassis)
+/**
+ * @param body The chassis rigid body (must be DYNAMIC for the vehicle to move)
+ * @param settings Vehicle-wide settings. Wheels are added afterwards with VehicleConstraint::addWheel().
+ * @return A pointer to the new vehicle constraint
+ */
+VehicleConstraint* PhysicsWorld::createVehicle(RigidBody* body, const VehicleConstraintSettings& settings) {
+
+    assert(body != nullptr);
+
+    void* allocatedMemory = mMemoryManager.allocate(MemoryManager::AllocationType::Heap, sizeof(VehicleConstraint));
+    VehicleConstraint* vehicle = new (allocatedMemory) VehicleConstraint(*this, body, settings, mMemoryManager.getHeapAllocator());
+    mVehicles.add(vehicle);
+
+    RP3D_LOG(mConfig.worldName, Logger::Level::Information, Logger::Category::Joint,
+             "Vehicle: New vehicle created on body " + std::to_string(body->getEntity().id),  __FILE__, __LINE__);
+
+    return vehicle;
+}
+
+// Destroy a vehicle constraint
+/**
+ * @param vehicle Pointer to the vehicle constraint to destroy
+ */
+void PhysicsWorld::destroyVehicle(VehicleConstraint* vehicle) {
+
+    assert(vehicle != nullptr);
+
+    RP3D_LOG(mConfig.worldName, Logger::Level::Information, Logger::Category::Joint,
+             "Vehicle: Vehicle on body " + std::to_string(vehicle->getBody()->getEntity().id) + " destroyed",  __FILE__, __LINE__);
+
+    mVehicles.remove(vehicle);
+
+    // Call the destructor of the vehicle
+    vehicle->~VehicleConstraint();
+
+    // Release the allocated memory
+    mMemoryManager.release(MemoryManager::AllocationType::Heap, vehicle, sizeof(VehicleConstraint));
+}
+
+// Return the number of vehicle constraints in the world
+uint32 PhysicsWorld::getNbVehicles() const {
+    return static_cast<uint32>(mVehicles.size());
+}
+
+// Return a vehicle constraint of the world
+VehicleConstraint* PhysicsWorld::getVehicle(uint32 index) {
+    assert(index < mVehicles.size());
+    return mVehicles[index];
+}
+
+// Return a vehicle constraint of the world
+const VehicleConstraint* PhysicsWorld::getVehicle(uint32 index) const {
+    assert(index < mVehicles.size());
+    return mVehicles[index];
+}
 
 // Set the number of iterations for the velocity constraint solver
 /**

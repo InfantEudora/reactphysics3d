@@ -34,6 +34,7 @@
 #include <reactphysics3d/systems/SolveHingeJointSystem.h>
 #include <reactphysics3d/systems/SolveSliderJointSystem.h>
 #include <reactphysics3d/systems/SolveSpringJointSystem.h>
+#include <reactphysics3d/systems/SolveVehicleSystem.h>
 
 namespace reactphysics3d {
 
@@ -177,6 +178,9 @@ class ConstraintSolverSystem {
         /// Solver for the SpringJoint constraints
         SolveSpringJointSystem mSolveSpringJointSystem;
 
+        /// Solver for the VehicleConstraint constraints
+        SolveVehicleSystem mSolveVehicleSystem;
+
 #ifdef IS_RP3D_PROFILING_ENABLED
 
 		/// Pointer to the profiler
@@ -194,7 +198,8 @@ class ConstraintSolverSystem {
                                BallAndSocketJointComponents& ballAndSocketJointComponents,
                                FixedJointComponents& fixedJointComponents, HingeJointComponents &hingeJointComponents,
                                SliderJointComponents& sliderJointComponents,
-                               SpringJointComponents& springJointComponents);
+                               SpringJointComponents& springJointComponents,
+                               Array<VehicleConstraint*>& vehicles);
 
         /// Destructor
         ~ConstraintSolverSystem() = default;
@@ -230,6 +235,7 @@ RP3D_FORCE_INLINE void ConstraintSolverSystem::setProfiler(Profiler* profiler) {
     mSolveHingeJointSystem.setProfiler(profiler);
     mSolveSliderJointSystem.setProfiler(profiler);
     mSolveSpringJointSystem.setProfiler(profiler);
+    mSolveVehicleSystem.setProfiler(profiler);
 }
 
 #endif

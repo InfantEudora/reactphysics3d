@@ -390,6 +390,7 @@ class RigidBodyComponents : public Components {
         friend class SolveHingeJointSystem;
         friend class SolveSliderJointSystem;
         friend class SolveSpringJointSystem;
+        friend class SolveVehicleSystem;
         friend class DynamicsSystem;
         friend class BallAndSocketJoint;
         friend class FixedJoint;

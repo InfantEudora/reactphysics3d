@@ -42,6 +42,7 @@
 #include <reactphysics3d/components/HingeJointComponents.h>
 #include <reactphysics3d/components/SliderJointComponents.h>
 #include <reactphysics3d/components/SpringJointComponents.h>
+#include <reactphysics3d/constraint/VehicleConstraint.h>
 #include <reactphysics3d/collision/CollisionCallback.h>
 #include <reactphysics3d/collision/OverlapCallback.h>
 #include <reactphysics3d/configuration.h>
@@ -214,6 +215,9 @@ class PhysicsWorld {
         /// Spring joints Components
         SpringJointComponents mSpringJointsComponents;
 
+        /// Vehicle constraints of the world
+        Array<VehicleConstraint*> mVehicles;
+
         /// Reference to the collision detection
         CollisionDetectionSystem mCollisionDetection;
 
@@ -385,6 +389,21 @@ class PhysicsWorld {
         /// Destroy a joint
         void destroyJoint(Joint* joint);
 
+        /// Create a vehicle constraint on a rigid body (the chassis). Add wheels with VehicleConstraint::addWheel().
+        VehicleConstraint* createVehicle(RigidBody* body, const VehicleConstraintSettings& settings = VehicleConstraintSettings());
+
+        /// Destroy a vehicle constraint
+        void destroyVehicle(VehicleConstraint* vehicle);
+
+        /// Return the number of vehicle constraints in the world
+        uint32 getNbVehicles() const;
+
+        /// Return a vehicle constraint of the world
+        VehicleConstraint* getVehicle(uint32 index);
+
+        /// Return a vehicle constraint of the world
+        const VehicleConstraint* getVehicle(uint32 index) const;
+
         /// Return the gravity vector of the world
         Vector3 getGravity() const;
 
@@ -465,6 +484,7 @@ class PhysicsWorld {
         friend class HingeJoint;
         friend class SliderJoint;
         friend class SpringJoint;
+        friend class VehicleConstraint;
         friend class CollisionCallback::CallbackData;
         friend class OverlapCallback::CallbackData;
         friend class DebugRenderer;

@@ -50,6 +50,7 @@
 #include "tests/engine/TestRigidBody.h"
 #include "tests/constraint/TestAxisConstraintPart.h"
 #include "tests/constraint/TestSpringJoint.h"
+#include "tests/constraint/TestVehicleConstraint.h"
 #include "tests/systems/TestDynamicSystem.h"
 #include "tests/utils/TestQuickHull.h"
 
@@ -103,6 +104,7 @@ int main() {
 
     testSuite.addTest(new TestAxisConstraintPart("AxisConstraintPart"));
     testSuite.addTest(new TestSpringJoint("SpringJoint"));
+    testSuite.addTest(new TestVehicleConstraint("VehicleConstraint"));
 
     // Run the tests
     testSuite.run();
