@@ -91,6 +91,13 @@ class TestUprightConstraint : public Test {
             return std::acos(clamp(up.y, decimal(-1.0), decimal(1.0)));
         }
 
+        /// Angular momentum of the body in world space
+        Vector3 angularMomentum() const {
+            const Matrix3x3 rotation = mBody->getTransform().getOrientation().getMatrix();
+            const Vector3 angularVelocityLocal = rotation.getTranspose() * mBody->getAngularVelocity();
+            return rotation * (angularVelocityLocal * mBody->getLocalInertiaTensor());
+        }
+
         /// Signed roll (rad) of the body up axis in the xy plane, positive towards -x (a positive rotation about z)
         decimal signedRoll() const {
             const Vector3 up = mBody->getTransform().getOrientation() * Vector3(0, 1, 0);
@@ -243,15 +250,20 @@ class TestUprightConstraint : public Test {
             destroyScene();
         }
 
-        /// Yaw is not constrained: a body spinning about the world axis keeps spinning
+        /// Yaw is not constrained: a body spinning about the world axis keeps spinning. The body is
+        /// tilted 20 degrees inside a 30 degree cone, so it spins about a non-principal axis and
+        /// nutates: the direction of w wobbles, but its magnitude and the angular momentum about
+        /// the world axis stay (up to the small dissipation of the gyroscopic integration).
         void testHardConeLeavesYawFree() {
             UprightConstraintSettings settings;
             settings.maxAngle = 30 * DEG;
             createScene(20 * DEG, settings);
             mBody->setAngularVelocity(Vector3(0, 3, 0));
+            const decimal initialMomentumY = angularMomentum().y;
             step(120);
 
-            rp3d_test(std::abs(mBody->getAngularVelocity().y - decimal(3.0)) < decimal(0.05));
+            rp3d_test(std::abs(mBody->getAngularVelocity().length() - decimal(3.0)) < decimal(0.1));
+            rp3d_test(std::abs(angularMomentum().y - initialMomentumY) < std::abs(initialMomentumY) * decimal(0.02));
             rp3d_test(tilt() < 30 * DEG + decimal(0.5) * DEG);
             rp3d_test(!mConstraint->isActive());
 

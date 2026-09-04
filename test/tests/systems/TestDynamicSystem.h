@@ -29,6 +29,8 @@
 // Libraries
 #include <reactphysics3d/reactphysics3d.h>
 #include "Test.h"
+#include <cmath>
+#include <algorithm>
 /// Reactphysics3D namespace
 namespace reactphysics3d {
 
@@ -52,7 +54,7 @@ public:
   virtual ~TestDynamicSystem();
         
   /// Run the tests
-  virtual void run() override { testMotionIntegration(); }
+  virtual void run() override { testMotionIntegration(); testFastSpinStability(); }
         
   // @brief integerates motion of Rigid Body and checks if angular momentum 
   // remains constant.
@@ -60,6 +62,11 @@ public:
   // In absence of gravity and without colisions there is no source of torque.
   // Without torque angular momentum have to be constant.
   void testMotionIntegration();
+
+  // @brief A body spinning fast about an axis that is not exactly a principal axis must stay
+  // bounded and keep its angular momentum. Explicit integration of the gyroscopic term diverged
+  // to NaN within seconds here.
+  void testFastSpinStability();
         
   Vector3 getAngularMomentum(RigidBody* pBody);
 };
@@ -113,7 +120,38 @@ void TestDynamicSystem::testMotionIntegration(){
     }
     Vector3 finalAngularMomentum =  getAngularMomentum(mRigidBody1);
     
-    rp3d_test(Vector3::approxEqual(initialAngularMomentum, finalAngularMomentum)); 
+    // Conserved up to the second-order dissipation of the implicit gyroscopic step (roundoff, and
+    // machine epsilon over 400 steps is not a meaningful demand)
+    rp3d_test((finalAngularMomentum - initialAngularMomentum).length() < initialAngularMomentum.length() * decimal(1e-3));
+}
+
+inline
+void TestDynamicSystem::testFastSpinStability(){
+
+    // A 1 x 0.4 x 1.6 m box of 10 kg (inertia about 2.27, 2.97, 0.97), tilted 5 degrees and spun
+    // at 15 rad/s about world y: a quarter radian per 60 Hz step
+    const decimal tilt = decimal(5.0) * PI_RP3D / decimal(180.0);
+    RigidBody* body = mWorld->createRigidBody(Transform(Vector3(10, 0, 0), Quaternion::fromEulerAngles(0, 0, tilt)));
+    body->setMass(decimal(10.0));
+    body->setLocalInertiaTensor(Vector3(2.267, 2.967, 0.967));
+    body->setAngularVelocity(Vector3(0, 15, 0));
+
+    const Vector3 initialAngularMomentum = getAngularMomentum(body);
+    const decimal timeStep = decimal(1.0) / decimal(60.0);
+    decimal maxSpin = 0;
+    for (int i = 0; i < 1200; i++) {
+        mWorld->update(timeStep);
+        maxSpin = std::max(maxSpin, body->getAngularVelocity().length());
+    }
+    const Vector3 finalAngularMomentum = getAngularMomentum(body);
+
+    rp3d_test(std::isfinite(maxSpin));
+    // Bounded: the spin can trade between axes but never grow past what the inertia range allows
+    rp3d_test(maxSpin < decimal(15.0) * decimal(2.967) / decimal(0.967) * decimal(1.05));
+    // Angular momentum kept (up to the first-order orientation integration)
+    rp3d_test((finalAngularMomentum - initialAngularMomentum).length() < initialAngularMomentum.length() * decimal(0.02));
+
+    mWorld->destroyRigidBody(body);
 }
 
 inline 

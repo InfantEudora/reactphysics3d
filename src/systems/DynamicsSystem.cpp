@@ -136,28 +136,58 @@ void DynamicsSystem::integrateRigidBodiesVelocities(decimal timeStep) {
                                                                mRigidBodyComponents.mLinearLockAxisFactors[i] * mRigidBodyComponents.mExternalForces[i];
 
 
-        mRigidBodyComponents.mConstrainedAngularVelocities[i] = angularVelocity; // old part of angular velocity 
+        // Angular velocity: external torque plus the gyroscopic effect (Euler's equations of
+        // motion, d/dt(I w) = T - w x I w in the body frame). The gyroscopic term is integrated
+        // IMPLICITLY: explicit forward Euler gains energy every step and a fast-spinning body that is
+        // not exactly on a principal axis spins up to infinity within seconds, while a scheme that
+        // only rotates the angular momentum keeps |L| but not the energy and lets the spin drift to
+        // the minor axis. Solving I w' - I w + dt w' x I w' = 0 for w' with one Newton step (as
+        // Bullet and PhysX do) is stable for any spin rate and slightly dissipative, so a wobbling
+        // body settles onto its major axis like a real one.
+        mRigidBodyComponents.mConstrainedAngularVelocities[i] = angularVelocity;
         {
-          Entity & entity = mRigidBodyComponents.mBodiesEntities[i];
-          const Matrix3x3 & B2W 
-              = mTransformComponents.getTransform(entity).getOrientation().getMatrix();
-          const Matrix3x3 W2B = B2W.getTranspose();
+            const Entity& entity = mRigidBodyComponents.mBodiesEntities[i];
+            const Quaternion& orientation = mTransformComponents.getTransform(entity).getOrientation();
+            const Quaternion orientationInverse = orientation.getInverse();
+            const Vector3& inertiaLocal = mRigidBodyComponents.mLocalInertiaTensors[i];
+            const Vector3& inverseInertiaLocal = mRigidBodyComponents.mInverseInertiaTensorsLocal[i];
+            const Vector3& lockFactors = mRigidBodyComponents.mAngularLockAxisFactors[i];
 
-          // inertia in local CS
-          Vector3 & I = mRigidBodyComponents.mLocalInertiaTensors[i];
-          // torque in local CS
-          Vector3 L =  W2B * mRigidBodyComponents.mExternalTorques[i];
-          // angular velocity in local CS
-          Vector3 om = W2B * mRigidBodyComponents.getAngularVelocity(entity);
-          Vector3 eps; // angular acceleration in local CS
-          // Euler equation
-          eps.x = L.x + (I.y-I.z)*om.y*om.z;
-          eps.y = L.y + (I.z-I.x)*om.z*om.x;
-          eps.z = L.z + (I.x-I.y)*om.x*om.y;
-          eps = eps/I;
+            // External torque, in the local frame where the inertia tensor is diagonal
+            const Vector3 torqueLocal = orientationInverse * mRigidBodyComponents.mExternalTorques[i];
+            mRigidBodyComponents.mConstrainedAngularVelocities[i] += timeStep * lockFactors * (orientation * (inverseInertiaLocal * torqueLocal));
 
-          mRigidBodyComponents.mConstrainedAngularVelocities[i] +=
-              timeStep * mRigidBodyComponents.mAngularLockAxisFactors[i] * (B2W * eps);
+            // Gyroscopic effect, dynamic bodies with a full inertia tensor only (a kinematic body
+            // keeps the spin it was given)
+            if (mRigidBodyComponents.mBodyTypes[i] == BodyType::DYNAMIC &&
+                inertiaLocal.x > decimal(0.0) && inertiaLocal.y > decimal(0.0) && inertiaLocal.z > decimal(0.0)) {
+
+                const Vector3 w = orientationInverse * angularVelocity;
+                const Matrix3x3 inertiaMatrix(inertiaLocal.x, 0, 0, 0, inertiaLocal.y, 0, 0, 0, inertiaLocal.z);
+
+                // Newton iterations on f(w') = I (w' - w) + dt w' x I w' = 0 starting from w' = w,
+                // with Jacobian J = I + dt ([w']x I - [I w']x). One step is what Bullet does; for
+                // very elongated bodies (inertia ratios in the thousands) that single step is off
+                // by enough to bleed angular momentum at first order, so iterate until it converges.
+                Vector3 wNew = w;
+                for (int iteration = 0; iteration < 4; iteration++) {
+                    const Vector3 L = inertiaLocal * wNew;
+                    const Vector3 residual = inertiaLocal * (wNew - w) + timeStep * wNew.cross(L);
+                    const Matrix3x3 jacobian = inertiaMatrix + (Matrix3x3::computeSkewSymmetricMatrixForCrossProduct(wNew) * inertiaMatrix -
+                                                                Matrix3x3::computeSkewSymmetricMatrixForCrossProduct(L)) * timeStep;
+                    // J is I plus O(dt) terms, so its determinant is close to the inertia product;
+                    // compare against that, not against an absolute epsilon (a thin stick has an
+                    // inertia product of 1e-9 and is still perfectly invertible)
+                    const decimal determinant = jacobian.getDeterminant();
+                    if (std::abs(determinant) <= decimal(1e-6) * inertiaLocal.x * inertiaLocal.y * inertiaLocal.z) break;
+                    const Vector3 delta = jacobian.getInverse(determinant) * residual;
+                    wNew -= delta;
+                    if (delta.lengthSquare() <= decimal(1e-12) * std::max(decimal(1.0), wNew.lengthSquare())) break;
+                }
+
+                const Vector3 newAngularVelocity = orientation * wNew;
+                mRigidBodyComponents.mConstrainedAngularVelocities[i] += lockFactors * (newAngularVelocity - angularVelocity);
+            }
         }
     }
 
