@@ -30,6 +30,7 @@
 #include <reactphysics3d/constraint/SliderJoint.h>
 #include <reactphysics3d/constraint/SpringJoint.h>
 #include <reactphysics3d/constraint/VehicleConstraint.h>
+#include <reactphysics3d/constraint/UprightConstraint.h>
 #include <reactphysics3d/constraint/HingeJoint.h>
 #include <reactphysics3d/constraint/FixedJoint.h>
 #include <reactphysics3d/utils/Profiler.h>
@@ -64,7 +65,7 @@ PhysicsWorld::PhysicsWorld(MemoryManager& memoryManager, PhysicsCommon& physicsC
                 mTransformComponents(mMemoryManager.getHeapAllocator()), mCollidersComponents(mMemoryManager.getHeapAllocator()),
                 mJointsComponents(mMemoryManager.getHeapAllocator()), mBallAndSocketJointsComponents(mMemoryManager.getHeapAllocator()),
                 mFixedJointsComponents(mMemoryManager.getHeapAllocator()), mHingeJointsComponents(mMemoryManager.getHeapAllocator()),
-                mSliderJointsComponents(mMemoryManager.getHeapAllocator()), mSpringJointsComponents(mMemoryManager.getHeapAllocator()), mVehicles(mMemoryManager.getHeapAllocator()), mCollisionDetection(this, mCollidersComponents, mTransformComponents, mBodyComponents, mRigidBodyComponents,
+                mSliderJointsComponents(mMemoryManager.getHeapAllocator()), mSpringJointsComponents(mMemoryManager.getHeapAllocator()), mVehicles(mMemoryManager.getHeapAllocator()), mUprightConstraints(mMemoryManager.getHeapAllocator()), mCollisionDetection(this, mCollidersComponents, mTransformComponents, mBodyComponents, mRigidBodyComponents,
                                         mMemoryManager, physicsCommon.mTriangleShapeHalfEdgeStructure),
                 mCollisionBodies(mMemoryManager.getHeapAllocator()), mEventListener(nullptr),
                 mName(worldSettings.worldName),  mIslands(mMemoryManager.getSingleFrameAllocator()), mProcessContactPairsOrderIslands(mMemoryManager.getSingleFrameAllocator()),
@@ -72,7 +73,7 @@ PhysicsWorld::PhysicsWorld(MemoryManager& memoryManager, PhysicsCommon& physicsC
                                mCollidersComponents, mConfig.restitutionVelocityThreshold),
                 mConstraintSolverSystem(*this, mIslands, mRigidBodyComponents, mTransformComponents, mJointsComponents,
                                         mBallAndSocketJointsComponents, mFixedJointsComponents, mHingeJointsComponents,
-                                        mSliderJointsComponents, mSpringJointsComponents, mVehicles),
+                                        mSliderJointsComponents, mSpringJointsComponents, mVehicles, mUprightConstraints),
                 mDynamicsSystem(*this, mBodyComponents, mRigidBodyComponents, mTransformComponents, mCollidersComponents, mIsGravityEnabled, mConfig.gravity),
                 mNbVelocitySolverIterations(mConfig.defaultVelocitySolverNbIterations),
                 mNbPositionSolverIterations(mConfig.defaultPositionSolverNbIterations), 
@@ -144,9 +145,12 @@ PhysicsWorld::~PhysicsWorld() {
 
 #endif
 
-    // Destroy all the vehicles that have not been removed
+    // Destroy all the vehicles and upright constraints that have not been removed
     while (mVehicles.size() > 0) {
         destroyVehicle(mVehicles[mVehicles.size() - 1]);
+    }
+    while (mUprightConstraints.size() > 0) {
+        destroyUprightConstraint(mUprightConstraints[mUprightConstraints.size() - 1]);
     }
 
     // Destroy all the joints that have not been removed
@@ -477,6 +481,13 @@ void PhysicsWorld::destroyRigidBody(RigidBody* rigidBody) {
         }
     }
 
+    // Destroy all the upright constraints on the rigid body to be destroyed
+    for (uint64 i = mUprightConstraints.size(); i > 0; i--) {
+        if (mUprightConstraints[i - 1]->getBody() == rigidBody) {
+            destroyUprightConstraint(mUprightConstraints[i - 1]);
+        }
+    }
+
     // Destroy the corresponding entity and its components
     mBodyComponents.removeComponent(rigidBody->getEntity());
     mRigidBodyComponents.removeComponent(rigidBody->getEntity());
@@ -750,6 +761,63 @@ VehicleConstraint* PhysicsWorld::getVehicle(uint32 index) {
 const VehicleConstraint* PhysicsWorld::getVehicle(uint32 index) const {
     assert(index < mVehicles.size());
     return mVehicles[index];
+}
+
+// Create an upright constraint on a rigid body
+/**
+ * @param body The rigid body to keep upright (must be DYNAMIC to be affected)
+ * @param settings Which body axis, which world direction, the cone half angle and the spring
+ * @return A pointer to the new upright constraint
+ */
+UprightConstraint* PhysicsWorld::createUprightConstraint(RigidBody* body, const UprightConstraintSettings& settings) {
+
+    assert(body != nullptr);
+
+    void* allocatedMemory = mMemoryManager.allocate(MemoryManager::AllocationType::Heap, sizeof(UprightConstraint));
+    UprightConstraint* constraint = new (allocatedMemory) UprightConstraint(*this, body, settings);
+    mUprightConstraints.add(constraint);
+
+    RP3D_LOG(mConfig.worldName, Logger::Level::Information, Logger::Category::Joint,
+             "UprightConstraint: New upright constraint created on body " + std::to_string(body->getEntity().id),  __FILE__, __LINE__);
+
+    return constraint;
+}
+
+// Destroy an upright constraint
+/**
+ * @param constraint Pointer to the upright constraint to destroy
+ */
+void PhysicsWorld::destroyUprightConstraint(UprightConstraint* constraint) {
+
+    assert(constraint != nullptr);
+
+    RP3D_LOG(mConfig.worldName, Logger::Level::Information, Logger::Category::Joint,
+             "UprightConstraint: Upright constraint on body " + std::to_string(constraint->getBody()->getEntity().id) + " destroyed",  __FILE__, __LINE__);
+
+    mUprightConstraints.remove(constraint);
+
+    // Call the destructor of the constraint
+    constraint->~UprightConstraint();
+
+    // Release the allocated memory
+    mMemoryManager.release(MemoryManager::AllocationType::Heap, constraint, sizeof(UprightConstraint));
+}
+
+// Return the number of upright constraints in the world
+uint32 PhysicsWorld::getNbUprightConstraints() const {
+    return static_cast<uint32>(mUprightConstraints.size());
+}
+
+// Return an upright constraint of the world
+UprightConstraint* PhysicsWorld::getUprightConstraint(uint32 index) {
+    assert(index < mUprightConstraints.size());
+    return mUprightConstraints[index];
+}
+
+// Return an upright constraint of the world
+const UprightConstraint* PhysicsWorld::getUprightConstraint(uint32 index) const {
+    assert(index < mUprightConstraints.size());
+    return mUprightConstraints[index];
 }
 
 // Set the number of iterations for the velocity constraint solver

@@ -41,7 +41,8 @@ ConstraintSolverSystem::ConstraintSolverSystem(PhysicsWorld& world, Islands& isl
                                                HingeJointComponents& hingeJointComponents,
                                                SliderJointComponents& sliderJointComponents,
                                                SpringJointComponents& springJointComponents,
-                                               Array<VehicleConstraint*>& vehicles)
+                                               Array<VehicleConstraint*>& vehicles,
+                                               Array<UprightConstraint*>& uprightConstraints)
                  : mTimeStep(-1), mIsWarmStartingActive(true), mIslands(islands),
                    mConstraintSolverData(rigidBodyComponents, jointComponents),
                    mSolveBallAndSocketJointSystem(world, rigidBodyComponents, transformComponents, jointComponents, ballAndSocketJointComponents),
@@ -49,7 +50,8 @@ ConstraintSolverSystem::ConstraintSolverSystem(PhysicsWorld& world, Islands& isl
                    mSolveHingeJointSystem(world, rigidBodyComponents, transformComponents, jointComponents, hingeJointComponents),
                    mSolveSliderJointSystem(world, rigidBodyComponents, transformComponents, jointComponents, sliderJointComponents),
                    mSolveSpringJointSystem(world, rigidBodyComponents, transformComponents, jointComponents, springJointComponents),
-                   mSolveVehicleSystem(world, rigidBodyComponents, transformComponents, vehicles) {
+                   mSolveVehicleSystem(world, rigidBodyComponents, transformComponents, vehicles),
+                   mSolveUprightConstraintSystem(world, rigidBodyComponents, transformComponents, uprightConstraints) {
 
 #ifdef IS_RP3D_PROFILING_ENABLED
 
@@ -84,6 +86,8 @@ void ConstraintSolverSystem::initialize(decimal dt) {
     mSolveSpringJointSystem.setIsWarmStartingActive(mIsWarmStartingActive);
     mSolveVehicleSystem.setTimeStep(dt);
     mSolveVehicleSystem.setIsWarmStartingActive(mIsWarmStartingActive);
+    mSolveUprightConstraintSystem.setTimeStep(dt);
+    mSolveUprightConstraintSystem.setIsWarmStartingActive(mIsWarmStartingActive);
 
     mSolveBallAndSocketJointSystem.initBeforeSolve();
     mSolveFixedJointSystem.initBeforeSolve();
@@ -91,6 +95,7 @@ void ConstraintSolverSystem::initialize(decimal dt) {
     mSolveSliderJointSystem.initBeforeSolve();
     mSolveSpringJointSystem.initBeforeSolve();
     mSolveVehicleSystem.initBeforeSolve();
+    mSolveUprightConstraintSystem.initBeforeSolve();
 
     if (mIsWarmStartingActive) {
         mSolveBallAndSocketJointSystem.warmstart();
@@ -99,6 +104,7 @@ void ConstraintSolverSystem::initialize(decimal dt) {
         mSolveSliderJointSystem.warmstart();
         mSolveSpringJointSystem.warmstart();
         mSolveVehicleSystem.warmstart();
+        mSolveUprightConstraintSystem.warmstart();
     }
 }
 
@@ -113,6 +119,7 @@ void ConstraintSolverSystem::solveVelocityConstraints() {
     mSolveSliderJointSystem.solveVelocityConstraint();
     mSolveSpringJointSystem.solveVelocityConstraint();
     mSolveVehicleSystem.solveVelocityConstraint();
+    mSolveUprightConstraintSystem.solveVelocityConstraint();
 }
 
 // Solve the position constraints
@@ -126,4 +133,5 @@ void ConstraintSolverSystem::solvePositionConstraints() {
     mSolveSliderJointSystem.solvePositionConstraint();
     mSolveSpringJointSystem.solvePositionConstraint();
     mSolveVehicleSystem.solvePositionConstraint();
+    mSolveUprightConstraintSystem.solvePositionConstraint();
 }
