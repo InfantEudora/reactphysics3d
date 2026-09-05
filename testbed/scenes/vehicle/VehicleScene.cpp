@@ -66,7 +66,7 @@ VehicleScene::VehicleScene(const std::string& name, EngineSettings& settings, re
       : SceneDemo(name, settings, physicsCommon, true),
         mFloor(nullptr), mRamp(nullptr), mChassis(nullptr), mVehicle(nullptr), mRollOverLimiter(nullptr),
         mFrequency(1.5f), mDampingRatio(0.5f), mMassKg(1000.0f), mTireFriction(1.0f),
-        mEngineTorque(600.0f), mBrakeTorque(1500.0f), mMaxSteerDeg(30.0f), mUseRollOverLimiter(false),
+        mEngineTorque(600.0f), mBrakeTorque(1500.0f), mMaxSteerDeg(30.0f), mContactSamples(1.0f), mUseRollOverLimiter(false),
         mThrottle(0.0f), mSteerInput(0.0f), mBraking(false),
         mLastChassisPosition(0, SPAWN_HEIGHT, 0),
         mStatusLabel(nullptr) {
@@ -234,6 +234,7 @@ void VehicleScene::applySettings() {
         wheel.longitudinalFriction = mTireFriction;
         wheel.lateralFriction = mTireFriction;
         wheel.maxSteerAngle = mMaxSteerDeg * DEG;
+        wheel.numContactSamples = static_cast<rp3d::uint32>(mContactSamples + 0.5f);
     }
     setBoxMass(mChassis, mMassKg);
 }
@@ -435,6 +436,7 @@ void VehicleScene::createGuiWidgets(nanogui::Widget* parent) {
         return label;
     };
     addText("A chassis on a VehicleConstraint: four raycast wheels, each a spring-damper along its contact normal with a hard stop, plus tire friction along and across the rolling direction. Rear wheel drive, front wheel steering. The wheel boxes and struts are cosmetic.");
+    addText("Contact samples fans each wheel's single ray into several, offset forward/backward around the tire's rim, so a kerb or bump edge the centre ray alone would miss still gets found by an outer one.");
     addText("Per wheel: suspension length, normal (N), forward (F) and sideways (S) force in newtons, wheel surface speed v in m/s.");
 
     new Label(parent, "Keys", "sans-bold");
@@ -472,6 +474,7 @@ void VehicleScene::createGuiWidgets(nanogui::Widget* parent) {
     addSlider("Engine torque per wheel (Nm)", mEngineTorque, 0.0f, 3000.0f, 0);
     addSlider("Brake torque per wheel (Nm)", mBrakeTorque, 0.0f, 5000.0f, 0);
     addSlider("Steering lock (deg)", mMaxSteerDeg, 5.0f, 45.0f, 0);
+    addSlider("Contact samples per wheel", mContactSamples, 1.0f, 7.0f, 0);
 
     CheckBox* limiter = new CheckBox(parent, "Roll-over limiter (45 deg cone)");
     limiter->set_checked(mUseRollOverLimiter);

@@ -198,18 +198,49 @@ void SolveVehicleSystem::initWheel(VehicleConstraint& vehicle, VehicleWheel& whe
     wheel.mRotationAngle = std::fmod(wheel.mRotationAngle + wheel.mAngularVelocity * mTimeStep, decimal(2.0) * PI_RP3D);
     if (wheel.mRotationAngle < decimal(0.0)) wheel.mRotationAngle += decimal(2.0) * PI_RP3D;
 
+    // ---------- Tire steer basis ---------- //
+
+    // Steer the wheel forward and up directions about the steering axis. Needed both to offset
+    // the ground samples along the (steered) rolling direction below, and to build the friction
+    // basis once contact is found.
+    const Quaternion steer = rotationAboutAxis(settings.steeringAxis.getUnit(), wheel.mSteerAngle);
+    const Vector3 forwardLocal = steer * settings.wheelForward;
+    const Vector3 upLocal = steer * settings.wheelUp;
+    const Vector3 forwardWorld = bodyTransform.getOrientation() * forwardLocal;
+    const Vector3 rightWorld = bodyTransform.getOrientation() * forwardLocal.cross(upLocal);
+
     // ---------- Find the ground ---------- //
 
-    // Suspension ray: from the attachment point, along the suspension direction, as far as the
-    // wheel can droop plus its radius (the tread touches down before the hub gets there)
+    // Suspension ray(s): from the attachment point, along the suspension direction, as far as
+    // the wheel can droop plus its radius (the tread touches down before the hub gets there).
+    // With numContactSamples > 1, each extra ray is parallel to the first (same direction and
+    // length) but offset forward/backward along the steered rolling direction by radius * sin of
+    // an angle up to contactSampleHalfAngle - sample points around the tire's rim rather than
+    // just its very bottom - and whichever hits soonest (smallest fraction) wins: that is the
+    // part of the tire that would actually touch down first, e.g. against a kerb or bump edge
+    // the single centre ray would still be short of. The offset is perpendicular to the ray
+    // direction, so it does not affect how suspension length is measured from it below.
     const Vector3 directionLocal = settings.suspensionDirection.getUnit();
     const Vector3 directionWorld = bodyTransform.getOrientation() * directionLocal;
     const Vector3 anchorWorld = bodyTransform * settings.position;
     const decimal rayLength = settings.suspensionMaxLength + settings.radius;
-    const Ray ray(anchorWorld, anchorWorld + directionWorld * rayLength);
 
+    const uint32 sampleCount = std::max<uint32>(1, settings.numContactSamples);
     WheelRaycastCallback callback(vehicle.mBody, worldUp, vehicle.mCosMaxSlopeAngle);
-    mWorld.raycast(ray, &callback, vehicle.mRaycastCategoryMaskBits);
+    for (uint32 s = 0; s < sampleCount; s++) {
+
+        const decimal angle = sampleCount > 1 ?
+            -settings.contactSampleHalfAngle + decimal(s) * (decimal(2.0) * settings.contactSampleHalfAngle) / decimal(sampleCount - 1) :
+            decimal(0.0);
+        const Vector3 sampleOrigin = anchorWorld + forwardWorld * (settings.radius * std::sin(angle));
+        const Ray sampleRay(sampleOrigin, sampleOrigin + directionWorld * rayLength);
+
+        WheelRaycastCallback sampleCallback(vehicle.mBody, worldUp, vehicle.mCosMaxSlopeAngle);
+        mWorld.raycast(sampleRay, &sampleCallback, vehicle.mRaycastCategoryMaskBits);
+        if (sampleCallback.hasHit && (!callback.hasHit || sampleCallback.fraction < callback.fraction)) {
+            callback = sampleCallback;
+        }
+    }
 
     if (!callback.hasHit) {
 
@@ -238,15 +269,9 @@ void SolveVehicleSystem::initWheel(VehicleConstraint& vehicle, VehicleWheel& whe
 
     // ---------- Tire basis ---------- //
 
-    // Steer the wheel forward and up directions about the steering axis, then build the frame in
-    // the contact plane: the rolling direction is normal x right (so it stays perpendicular to the
-    // normal), flipped towards the wheel forward direction; the lateral direction completes it,
-    // pointing to the right of the wheel
-    const Quaternion steer = rotationAboutAxis(settings.steeringAxis.getUnit(), wheel.mSteerAngle);
-    const Vector3 forwardLocal = steer * settings.wheelForward;
-    const Vector3 upLocal = steer * settings.wheelUp;
-    const Vector3 forwardWorld = bodyTransform.getOrientation() * forwardLocal;
-    const Vector3 rightWorld = bodyTransform.getOrientation() * forwardLocal.cross(upLocal);
+    // Build the frame in the contact plane from the steer basis computed above: the rolling
+    // direction is normal x right (so it stays perpendicular to the normal), flipped towards the
+    // wheel forward direction; the lateral direction completes it, pointing to the right of the wheel
     Vector3 longitudinal = wheel.mContactNormal.cross(rightWorld);
     if (longitudinal.dot(forwardWorld) < decimal(0.0)) longitudinal = -longitudinal;
     if (longitudinal.lengthSquare() > MACHINE_EPSILON) {

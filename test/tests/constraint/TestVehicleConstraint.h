@@ -174,6 +174,8 @@ class TestVehicleConstraint : public Test {
             testBrake();
             testSteering();
             testWheelTransform();
+            testContactSamplingFlatGroundUnchanged();
+            testContactSamplingFindsKerb();
             testDestroyBodyDestroysVehicle();
         }
 
@@ -539,6 +541,73 @@ class TestVehicleConstraint : public Test {
             rp3d_test(Vector3::approxEqual(transform.getOrientation() * Vector3(0, 0, 1), Vector3(std::sin(steer), 0, std::cos(steer)), decimal(1e-3)));
             rp3d_test(Vector3::approxEqual(transform.getOrientation() * Vector3(0, 1, 0), Vector3(0, 1, 0), decimal(1e-3)));
 
+            destroyScene();
+        }
+
+        /// numContactSamples > 1 fans the wheel ray into several, each offset forward/backward
+        /// along the rolling direction by radius * sin(angle). On flat ground every sample lands
+        /// on the same plane, so the result must be unchanged from a single ray: same contact
+        /// body, suspension length and normal impulse, well within tolerance of each other.
+        void testContactSamplingFlatGroundUnchanged() {
+            createScene(Quaternion::identity(), decimal(1.3));
+            for (uint32 i = 0; i < 4; i++) {
+                mVehicle->getWheel(i).getSettings().numContactSamples = 5;
+            }
+            step(360);
+
+            const decimal weight = MASS * GRAVITY;
+            rp3d_test(std::abs(mVehicle->getTotalSuspensionForce(TIME_STEP) - weight) < weight * decimal(0.02));
+            for (uint32 i = 0; i < 4; i++) {
+                const VehicleWheel& wheel = mVehicle->getWheel(i);
+                rp3d_test(wheel.hasContact());
+                rp3d_test(wheel.getContactBody() == mFloor);
+                rp3d_test(Vector3::approxEqual(wheel.getContactNormal(), Vector3(0, 1, 0), decimal(1e-3)));
+                rp3d_test(std::abs(wheel.getSuspensionLength() - (MAX_LENGTH + MIN_LENGTH) * decimal(0.5)) < decimal(0.02));
+            }
+            rp3d_test(up().y > decimal(0.9999));
+
+            destroyScene();
+        }
+
+        /// A low kerb sits just ahead of wheel 0's own vertical line: within radius * sin(45 deg)
+        /// (about 0.212 m) of it, so an outer sample of a 3-way fan reaches it, but outside the
+        /// single centre ray's own line, so that ray never notices it at all. This is exactly the
+        /// improved bump/kerb handling multiple samples are for.
+        void testContactSamplingFindsKerb() {
+
+            // A single centre ray: finds only the plain floor beneath the anchor
+            createScene(Quaternion::identity(), decimal(0.95));
+            RigidBody* kerb = mWorld->createRigidBody(Transform(Vector3(0.8, 0.1, 1.65), Quaternion::identity()));
+            kerb->setType(BodyType::STATIC);
+            kerb->addCollider(mPhysicsCommon.createBoxShape(Vector3(0.15, 0.1, 0.15)), Transform::identity());
+            step(1);
+
+            rp3d_test(mVehicle->getWheel(0).hasContact());
+            rp3d_test(mVehicle->getWheel(0).getContactBody() == mFloor);
+            rp3d_test(std::abs(mVehicle->getWheel(0).getSuspensionLength() - decimal(0.45)) < decimal(0.01));
+
+            mWorld->destroyRigidBody(kerb);
+            destroyScene();
+
+            // The same scene again, wheel 0 now sampling a 3-way fan: the outermost sample lands
+            // on the kerb, closer than the plain floor, so that is what the wheel finds instead
+            createScene(Quaternion::identity(), decimal(0.95));
+            RigidBody* kerb2 = mWorld->createRigidBody(Transform(Vector3(0.8, 0.1, 1.65), Quaternion::identity()));
+            kerb2->setType(BodyType::STATIC);
+            kerb2->addCollider(mPhysicsCommon.createBoxShape(Vector3(0.15, 0.1, 0.15)), Transform::identity());
+            mVehicle->getWheel(0).getSettings().numContactSamples = 3;
+            step(1);
+
+            rp3d_test(mVehicle->getWheel(0).hasContact());
+            rp3d_test(mVehicle->getWheel(0).getContactBody() == kerb2);
+            rp3d_test(std::abs(mVehicle->getWheel(0).getSuspensionLength() - decimal(0.25)) < decimal(0.01));
+
+            // The other three wheels, unchanged and far from the kerb, still just see the floor
+            for (uint32 i = 1; i < 4; i++) {
+                rp3d_test(mVehicle->getWheel(i).getContactBody() == mFloor);
+            }
+
+            mWorld->destroyRigidBody(kerb2);
             destroyScene();
         }
 

@@ -93,6 +93,7 @@ class VehicleScene : public SceneDemo {
         float mEngineTorque;     // N.m per driven (rear) wheel at full throttle
         float mBrakeTorque;      // N.m per wheel when braking
         float mMaxSteerDeg;      // steering lock of the front wheels
+        float mContactSamples;   // ground samples per wheel ray (VehicleWheelSettings::numContactSamples), rounded to the nearest integer
         bool mUseRollOverLimiter;
 
         /// Driver inputs from the keys
