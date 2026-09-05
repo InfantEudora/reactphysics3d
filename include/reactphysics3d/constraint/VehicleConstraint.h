@@ -120,6 +120,10 @@ struct VehicleWheelSettings {
         /// space). A good default is the wheel centre at mid travel.
         Vector3 suspensionForcePoint;
 
+        /// If false the wheel is taken out of the simulation: no ray is cast, it reports no contact
+        /// and applies no force, as if it had come off. It still spins freely. Default true.
+        bool enabled;
+
         /// Number of ground samples cast per wheel, each a ray parallel to suspensionDirection but
         /// offset along the (steered) rolling direction, approximating points around the rim of the
         /// tire rather than just its very bottom. The one that touches down soonest is the wheel's
@@ -146,7 +150,7 @@ struct VehicleWheelSettings {
               radius(decimal(0.3)), width(decimal(0.1)), inertia(decimal(0.9)), angularDamping(decimal(0.2)),
               longitudinalFriction(decimal(1.0)), lateralFriction(decimal(1.0)),
               enableSuspensionForcePoint(false), suspensionForcePoint(0, 0, 0),
-              numContactSamples(1), contactSampleHalfAngle(PI_RP3D / decimal(4.0)) {}
+              enabled(true), numContactSamples(1), contactSampleHalfAngle(PI_RP3D / decimal(4.0)) {}
 };
 
 // Class VehicleWheel

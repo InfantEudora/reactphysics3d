@@ -225,7 +225,8 @@ void SolveVehicleSystem::initWheel(VehicleConstraint& vehicle, VehicleWheel& whe
     const Vector3 anchorWorld = bodyTransform * settings.position;
     const decimal rayLength = settings.suspensionMaxLength + settings.radius;
 
-    const uint32 sampleCount = std::max<uint32>(1, settings.numContactSamples);
+    // A disabled wheel casts nothing: it is "in the air" whatever is under it
+    const uint32 sampleCount = settings.enabled ? std::max<uint32>(1, settings.numContactSamples) : 0;
     WheelRaycastCallback callback(vehicle.mBody, worldUp, vehicle.mCosMaxSlopeAngle);
     for (uint32 s = 0; s < sampleCount; s++) {
 

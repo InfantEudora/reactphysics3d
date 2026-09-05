@@ -176,6 +176,7 @@ class TestVehicleConstraint : public Test {
             testWheelTransform();
             testContactSamplingFlatGroundUnchanged();
             testContactSamplingFindsKerb();
+            testDisabledWheel();
             testDestroyBodyDestroysVehicle();
         }
 
@@ -608,6 +609,42 @@ class TestVehicleConstraint : public Test {
             }
 
             mWorld->destroyRigidBody(kerb2);
+            destroyScene();
+        }
+
+        /// A disabled wheel casts no ray and carries nothing: the other three hold the car up on
+        /// their own (the total suspension force is still the weight), and re-enabling it puts
+        /// it back to work. The centre of mass is moved towards the rear first: with it at the
+        /// geometric centre the three remaining wheels' support triangle has its long edge running
+        /// exactly through it, and the car (correctly) tips over towards the missing front corner.
+        void testDisabledWheel() {
+            createScene(Quaternion::identity(), decimal(1.3));
+            mChassis->setLocalCenterOfMass(Vector3(0, 0, -0.5));
+            mVehicle->getWheel(0).getSettings().enabled = false;
+            step(360);
+
+            const decimal weight = MASS * GRAVITY;
+            rp3d_test(!mVehicle->getWheel(0).hasContact());
+            rp3d_test(approxEqual(mVehicle->getWheel(0).getNormalImpulse(), decimal(0.0)));
+            rp3d_test(approxEqual(mVehicle->getWheel(0).getSuspensionLength(), MAX_LENGTH));
+            for (uint32 i = 1; i < 4; i++) {
+                rp3d_test(mVehicle->getWheel(i).hasContact());
+            }
+            rp3d_test(std::abs(mVehicle->getTotalSuspensionForce(TIME_STEP) - weight) < weight * decimal(0.05));
+            // Three-wheeled, the chassis sags towards the missing corner but stays up
+            rp3d_test(up().y > decimal(0.95));
+
+            mVehicle->getWheel(0).getSettings().enabled = true;
+            step(360);
+            for (uint32 i = 0; i < 4; i++) {
+                rp3d_test(mVehicle->getWheel(i).hasContact());
+            }
+            // Back to carrying a real share (less than a quarter: the mass sits towards the rear)
+            const decimal share = mVehicle->getWheel(0).getSuspensionImpulse() / TIME_STEP;
+            rp3d_test(share > weight * decimal(0.05) && share < weight * decimal(0.25));
+            rp3d_test(std::abs(mVehicle->getTotalSuspensionForce(TIME_STEP) - weight) < weight * decimal(0.03));
+            rp3d_test(up().y > decimal(0.999));
+
             destroyScene();
         }
 
