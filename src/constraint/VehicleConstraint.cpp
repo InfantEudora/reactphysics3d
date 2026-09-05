@@ -51,6 +51,7 @@ VehicleConstraint::VehicleConstraint(PhysicsWorld& world, RigidBody* body, const
                                      MemoryAllocator& allocator)
                   : mWorld(world), mBody(body), mUp(settings.up.getUnit()), mForward(settings.forward.getUnit()),
                     mCosMaxSlopeAngle(std::cos(settings.maxSlopeAngle)), mRaycastCategoryMaskBits(settings.raycastCategoryMaskBits),
+                    mWarmStartImpulseRatio(clamp(settings.warmStartImpulseRatio, decimal(0.0), decimal(1.0))),
                     mWheels(allocator), mBodyComponentIndex(0), mIsActiveThisStep(false) {
 
     assert(body != nullptr);

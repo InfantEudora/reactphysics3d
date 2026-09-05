@@ -177,6 +177,7 @@ class TestVehicleConstraint : public Test {
             testContactSamplingFlatGroundUnchanged();
             testContactSamplingFindsKerb();
             testDisabledWheel();
+            testTireStressRelaxesAfterCornering();
             testDestroyBodyDestroysVehicle();
         }
 
@@ -644,6 +645,46 @@ class TestVehicleConstraint : public Test {
             rp3d_test(share > weight * decimal(0.05) && share < weight * decimal(0.25));
             rp3d_test(std::abs(mVehicle->getTotalSuspensionForce(TIME_STEP) - weight) < weight * decimal(0.03));
             rp3d_test(up().y > decimal(0.999));
+
+            destroyScene();
+        }
+
+        /// After a hard corner the tires relax once the car rolls straight again: no wheel is
+        /// left pushing sideways against its neighbour. With a full warm start (ratio 1) the
+        /// solver keeps whatever equal-and-opposite lateral impulses the corner left behind - they
+        /// cause no velocity error, so nothing ever removes them - and a wheel can sit at its
+        /// friction limit on a straight road. The default ratio lets them decay.
+        void testTireStressRelaxesAfterCornering() {
+            createScene(Quaternion::identity(), decimal(1.3));
+            step(120);
+
+            const decimal weight = MASS * GRAVITY;
+
+            // A tight corner under power: front wheels steered 25 degrees, rear wheels driven
+            const decimal steer = decimal(25.0) * PI_RP3D / decimal(180.0);
+            mVehicle->getWheel(0).setSteerAngle(steer);
+            mVehicle->getWheel(1).setSteerAngle(steer);
+            driveRear(decimal(400.0));
+            step(240);
+            rp3d_test(std::abs(mChassis->getAngularVelocity().y) > decimal(0.3));   // it is turning
+
+            // Straighten up, throttle off, and roll on
+            mVehicle->getWheel(0).setSteerAngle(decimal(0.0));
+            mVehicle->getWheel(1).setSteerAngle(decimal(0.0));
+            driveRear(decimal(0.0));
+            step(240);
+
+            // Still upright and on all four wheels, and no tire is fighting its neighbour: the
+            // sideways force on every wheel is small against its own grip limit
+            rp3d_test(up().y > decimal(0.99));
+            for (uint32 i = 0; i < 4; i++) {
+                const VehicleWheel& wheel = mVehicle->getWheel(i);
+                rp3d_test(wheel.hasContact());
+                const decimal lateral = std::abs(wheel.getLateralImpulse()) / TIME_STEP;
+                const decimal limit = wheel.getSettings().lateralFriction * wheel.getNormalImpulse() / TIME_STEP;
+                rp3d_test(lateral < decimal(0.2) * limit);
+            }
+            rp3d_test(std::abs(mVehicle->getTotalSuspensionForce(TIME_STEP) - weight) < weight * decimal(0.05));
 
             destroyScene();
         }

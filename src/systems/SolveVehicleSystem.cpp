@@ -393,9 +393,16 @@ void SolveVehicleSystem::warmstart() {
             if (!wheel.hasContact()) continue;
 
             const AxisConstraintBody ground = makeGroundBody(wheel);
+
+            // The spring is warm started in full: a soft constraint's impulse is determined by the
+            // spring itself, so last step's value is simply the best guess. The hard parts (stop
+            // and sideways friction) only partially: with several wheels on one chassis they can
+            // hold an equal-and-opposite set of impulses that produces no velocity error, which
+            // a full warm start would carry forward for ever - see
+            // VehicleConstraintSettings::warmStartImpulseRatio.
             wheel.mSuspensionPart.warmStart(ground, chassis, wheel.mContactNormal);
-            wheel.mHardStopPart.warmStart(ground, chassis, wheel.mContactNormal);
-            wheel.mLateralPart.warmStart(ground, chassis, wheel.mContactLateral);
+            wheel.mHardStopPart.warmStart(ground, chassis, wheel.mContactNormal, vehicle.mWarmStartImpulseRatio);
+            wheel.mLateralPart.warmStart(ground, chassis, wheel.mContactLateral, vehicle.mWarmStartImpulseRatio);
 
             // The longitudinal impulse is NOT warm started: it is recomputed every step from the
             // difference between wheel spin and ground speed (or from the brake), and the spin of
