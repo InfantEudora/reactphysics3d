@@ -40,17 +40,32 @@ namespace vehiclescene {
 const float SCENE_RADIUS = 12.0f;
 const int NB_WHEELS = 4;
 
+/// How the driver inputs reach the wheels
+enum class DriveMode {
+
+    /// The front wheels steer, the rear wheels drive
+    Car,
+
+    /// No wheel ever steers: the left and the right pair are driven independently and the
+    /// vehicle turns by the difference between them (skid steer)
+    Tank
+};
+
 // Class VehicleScene
 /**
  * A drivable four-wheeled chassis on a VehicleConstraint (raycast wheel suspension). The wheels
  * are rays, not bodies: the wheel boxes and struts are cosmetic and follow what the constraint
  * reports, spinning and steering with it.
  *
- * Drive with the arrow keys (up/down: rear wheel torque, left/right: front wheel steering) and
- * brake with space. Drop the car flat, tilted or onto the ramp, push it, and tune suspension,
- * mass, tire friction, engine torque, brake torque and steering lock live. The status lines
- * show each wheel's suspension length, forces and surface speed, and the total normal force
- * against the weight. The camera follows the car.
+ * Two drive modes: a car (front wheels steer, rear wheels drive) and a tank (no steering
+ * angle at all, the left and right pair driven independently so the vehicle skid steers).
+ *
+ * Drive with the arrow keys (up/down: drive torque, left/right: steering or, in tank mode, the
+ * track differential) and brake with space. Drop the car flat, tilted or onto the ramp, push it,
+ * and tune suspension, mass, longitudinal and lateral tire friction, cornering stiffness, engine
+ * torque, brake torque, steering lock and the tank's inner track power live. The status lines show each
+ * wheel's suspension length, forces and surface speed, and the total normal force against the
+ * weight. The camera follows the car.
  */
 class VehicleScene : public SceneDemo {
 
@@ -89,16 +104,20 @@ class VehicleScene : public SceneDemo {
         float mFrequency;        // Hz
         float mDampingRatio;     // 1 = critical
         float mMassKg;
-        float mTireFriction;     // longitudinal and lateral friction coefficient
-        float mEngineTorque;     // N.m per driven (rear) wheel at full throttle
+        float mLongitudinalFriction;   // friction coefficient along the rolling direction
+        float mLateralFriction;        // friction coefficient across it
+        float mCorneringStiffness;     // sideways force per radian of slip angle, times the normal force
+        float mEngineTorque;     // N.m per driven wheel at full throttle
         float mBrakeTorque;      // N.m per wheel when braking
-        float mMaxSteerDeg;      // steering lock of the front wheels
+        float mMaxSteerDeg;      // steering lock of the front wheels, car mode only
+        DriveMode mDriveMode;
+        float mInnerTrackPower;  // tank: the fraction of the throttle left on the inside track in a turn
         float mContactSamples;   // ground samples per wheel ray (VehicleWheelSettings::numContactSamples), rounded to the nearest integer
         bool mUseRollOverLimiter;
 
         /// Driver inputs from the keys
         float mThrottle;         // -1, 0 or 1
-        float mSteerInput;       // -1 (right), 0 or 1 (left)
+        float mSteerInput;       // -1 (right), 0 or 1 (left); the track differential in tank mode
         bool mBraking;
 
         /// Camera follow

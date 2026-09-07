@@ -30,6 +30,7 @@
 #include <reactphysics3d/body/RigidBody.h>
 #include <reactphysics3d/collision/RaycastInfo.h>
 #include <reactphysics3d/collision/Collider.h>
+#include <cmath>
 
 using namespace reactphysics3d;
 
@@ -150,6 +151,7 @@ void SolveVehicleSystem::initBeforeSolve() {
                 wheel.mHardStopPart.deactivate();
                 wheel.mLongitudinalPart.deactivate();
                 wheel.mLateralPart.deactivate();
+                wheel.mLateralSlipAngle = decimal(0.0);
             }
             continue;
         }
@@ -252,6 +254,7 @@ void SolveVehicleSystem::initWheel(VehicleConstraint& vehicle, VehicleWheel& whe
         wheel.mHardStopPart.deactivate();
         wheel.mLongitudinalPart.deactivate();
         wheel.mLateralPart.deactivate();
+        wheel.mLateralSlipAngle = decimal(0.0);
         return;
     }
 
@@ -293,6 +296,18 @@ void SolveVehicleSystem::initWheel(VehicleConstraint& vehicle, VehicleWheel& whe
     // chassis up off the ground, along the longitudinal axis it pushes the chassis forward
     const AxisConstraintBody ground = makeGroundBody(wheel);
     const AxisConstraintBody chassis = makeChassisBody(vehicle);
+
+    // ---------- Slip angle ---------- //
+
+    // Where the tire is actually travelling relative to the ground under it. The angle between
+    // that and the rolling direction is what builds the sideways force, and it is measured once
+    // here rather than inside the solver so that every iteration works from the slip the step
+    // started with instead of chasing the slip it has just removed.
+    const Vector3 contactPointVelocity = *chassis.linearVelocity + chassis.angularVelocity->cross(wheel.mR2);
+    const Vector3 groundPointVelocity = *ground.linearVelocity + ground.angularVelocity->cross(wheel.mR1);
+    const Vector3 slipVelocity = contactPointVelocity - groundPointVelocity;
+    wheel.mLateralSlipAngle = std::atan2(std::abs(wheel.mContactLateral.dot(slipVelocity)),
+                                         std::abs(wheel.mContactLongitudinal.dot(slipVelocity)));
 
     // ---------- Suspension spring ---------- //
 
@@ -451,6 +466,19 @@ void SolveVehicleSystem::solveSuspension(VehicleConstraint& vehicle, const AxisC
     }
 }
 
+// How much of a tire's grip is left in one direction once the other direction has taken its
+// share, as a fraction of that direction's own limit. Zero when the other direction is fully
+// saturated, one when it carries nothing: the pair traces the friction ellipse. The two
+// directions are solved one after the other and each sees the other's impulse from the previous
+// solve, so over the velocity iterations they settle onto a shared split of the budget.
+static decimal remainingGripFactor(decimal otherImpulse, decimal otherMaxImpulse) {
+
+    if (otherMaxImpulse <= decimal(0.0)) return decimal(0.0);
+
+    const decimal used = std::min(std::abs(otherImpulse) / otherMaxImpulse, decimal(1.0));
+    return std::sqrt(std::max(decimal(0.0), decimal(1.0) - used * used));
+}
+
 // Solve the longitudinal tire friction of the wheels of a vehicle (and update their spin)
 void SolveVehicleSystem::solveLongitudinalFriction(VehicleConstraint& vehicle, const AxisConstraintBody& chassis) {
 
@@ -462,8 +490,11 @@ void SolveVehicleSystem::solveLongitudinalFriction(VehicleConstraint& vehicle, c
         const VehicleWheelSettings& settings = wheel.mSettings;
         const AxisConstraintBody ground = makeGroundBody(wheel);
 
-        // The most the tire can transmit this step, from the normal impulse so far
-        const decimal maxFrictionImpulse = settings.longitudinalFriction * wheel.getNormalImpulse();
+        // The most the tire can transmit this step, from the normal impulse so far, less whatever
+        // share of the grip the sideways direction is already using
+        const decimal maxFrictionImpulse = settings.longitudinalFriction * wheel.getNormalImpulse() *
+                                           remainingGripFactor(wheel.mLateralPart.getTotalLambda(),
+                                                               settings.lateralFriction * wheel.getNormalImpulse());
 
         // Velocity of the chassis at the tire relative to the ground, along the rolling direction
         const Vector3 chassisPointVelocity = *chassis.linearVelocity + chassis.angularVelocity->cross(wheel.mR2);
@@ -516,8 +547,17 @@ void SolveVehicleSystem::solveLateralFriction(VehicleConstraint& vehicle, const 
 
         const AxisConstraintBody ground = makeGroundBody(wheel);
 
-        // Sideways the tire simply tries to stop all slip, up to its friction limit
-        const decimal maxImpulse = wheel.mSettings.lateralFriction * wheel.getNormalImpulse();
+        // Sideways the tire builds force with slip: cornering stiffness per radian of slip angle,
+        // saturating at whatever grip is left once the rolling direction has taken its share. The
+        // proportional band below saturation is what lets the sideways force rise and fall with
+        // the heading error instead of being all or nothing.
+        const VehicleWheelSettings& settings = wheel.mSettings;
+        const decimal normalImpulse = wheel.getNormalImpulse();
+        const decimal gripLimit = settings.lateralFriction * normalImpulse *
+                                  remainingGripFactor(wheel.mLongitudinalPart.getTotalLambda(),
+                                                      settings.longitudinalFriction * normalImpulse);
+        const decimal maxImpulse = std::min(settings.corneringStiffness * wheel.mLateralSlipAngle * normalImpulse,
+                                            gripLimit);
         wheel.mLateralPart.solveVelocityConstraint(ground, chassis, wheel.mContactLateral, -maxImpulse, maxImpulse);
     }
 }

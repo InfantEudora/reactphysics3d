@@ -65,8 +65,11 @@ static rp3d::Quaternion rotationWithZAlong(const rp3d::Vector3& dir) {
 VehicleScene::VehicleScene(const std::string& name, EngineSettings& settings, reactphysics3d::PhysicsCommon& physicsCommon)
       : SceneDemo(name, settings, physicsCommon, true),
         mFloor(nullptr), mRamp(nullptr), mChassis(nullptr), mVehicle(nullptr), mRollOverLimiter(nullptr),
-        mFrequency(1.5f), mDampingRatio(0.5f), mMassKg(1000.0f), mTireFriction(1.0f),
-        mEngineTorque(600.0f), mBrakeTorque(1500.0f), mMaxSteerDeg(30.0f), mContactSamples(1.0f), mUseRollOverLimiter(false),
+        mFrequency(1.5f), mDampingRatio(0.5f), mMassKg(1000.0f),
+        mLongitudinalFriction(1.0f), mLateralFriction(1.0f), mCorneringStiffness(7.0f),
+        mEngineTorque(600.0f), mBrakeTorque(1500.0f), mMaxSteerDeg(30.0f),
+        mDriveMode(DriveMode::Car), mInnerTrackPower(0.3f),
+        mContactSamples(1.0f), mUseRollOverLimiter(false),
         mThrottle(0.0f), mSteerInput(0.0f), mBraking(false),
         mLastChassisPosition(0, SPAWN_HEIGHT, 0),
         mStatusLabel(nullptr) {
@@ -231,8 +234,9 @@ void VehicleScene::applySettings() {
     for (rp3d::uint32 i = 0; i < mVehicle->getNbWheels(); i++) {
         rp3d::VehicleWheelSettings& wheel = mVehicle->getWheel(i).getSettings();
         wheel.suspensionSpring = rp3d::SpringSettings::fromFrequencyAndDampingRatio(mFrequency, mDampingRatio);
-        wheel.longitudinalFriction = mTireFriction;
-        wheel.lateralFriction = mTireFriction;
+        wheel.longitudinalFriction = mLongitudinalFriction;
+        wheel.lateralFriction = mLateralFriction;
+        wheel.corneringStiffness = mCorneringStiffness;
         wheel.maxSteerAngle = mMaxSteerDeg * DEG;
         wheel.numContactSamples = static_cast<rp3d::uint32>(mContactSamples + 0.5f);
     }
@@ -262,11 +266,37 @@ void VehicleScene::applyDriverInputs() {
 
     if (mVehicle == nullptr) return;
 
+    // Tank: the two wheels of a side share a track, so they always get the same torque. Steering
+    // is the difference between the sides. Under throttle the inside track is only reduced, which
+    // arcs the vehicle; with the throttle released the sides are driven opposite ways, which
+    // pivots it on the spot.
+    float leftPower = mThrottle;
+    float rightPower = mThrottle;
+    if (mDriveMode == DriveMode::Tank && mSteerInput != 0.0f) {
+        if (mThrottle != 0.0f) {
+            float& insideTrack = (mSteerInput > 0.0f) ? leftPower : rightPower;
+            insideTrack = mThrottle * mInnerTrackPower;
+        }
+        else {
+            leftPower = -mSteerInput;
+            rightPower = mSteerInput;
+        }
+    }
+
     for (rp3d::uint32 i = 0; i < mVehicle->getNbWheels(); i++) {
+
         rp3d::VehicleWheel& wheel = mVehicle->getWheel(i);
         const bool isFront = i < 2;
-        wheel.setSteerAngle(isFront ? mSteerInput * mMaxSteerDeg * DEG : 0.0f);
-        wheel.setDriveTorque(isFront ? 0.0f : mThrottle * mEngineTorque);
+        const bool isLeft = (i % 2 == 0);
+
+        if (mDriveMode == DriveMode::Tank) {
+            wheel.setSteerAngle(0.0f);
+            wheel.setDriveTorque((isLeft ? leftPower : rightPower) * mEngineTorque);
+        }
+        else {
+            wheel.setSteerAngle(isFront ? mSteerInput * mMaxSteerDeg * DEG : 0.0f);
+            wheel.setDriveTorque(isFront ? 0.0f : mThrottle * mEngineTorque);
+        }
         wheel.setBrakeTorque(mBraking ? mBrakeTorque : 0.0f);
     }
 }
@@ -371,7 +401,8 @@ void VehicleScene::update() {
                      << std::setprecision(0) << "N " << (wheel.getNormalImpulse() / timeStep)
                      << ", F " << (wheel.getLongitudinalImpulse() / timeStep)
                      << ", S " << (wheel.getLateralImpulse() / timeStep)
-                     << std::setprecision(1) << ", v " << (wheel.getAngularVelocity() * wheel.getSettings().radius);
+                     << std::setprecision(1) << ", v " << (wheel.getAngularVelocity() * wheel.getSettings().radius)
+                     << ", slip " << (wheel.getLateralSlipAngle() / DEG) << " deg";
             }
             else {
                 line << "in the air, v " << std::fixed << std::setprecision(1) << (wheel.getAngularVelocity() * wheel.getSettings().radius);
@@ -435,16 +466,23 @@ void VehicleScene::createGuiWidgets(nanogui::Widget* parent) {
         label->set_fixed_width(230);   // wraps
         return label;
     };
-    addText("A chassis on a VehicleConstraint: four raycast wheels, each a spring-damper along its contact normal with a hard stop, plus tire friction along and across the rolling direction. Rear wheel drive, front wheel steering. The wheel boxes and struts are cosmetic.");
-    addText("Contact samples fans each wheel's single ray into several, offset forward/backward around the tire's rim, so a kerb or bump edge the centre ray alone would miss still gets found by an outer one.");
     addText("Per wheel: suspension length, normal (N), forward (F) and sideways (S) force in newtons, wheel surface speed v in m/s.");
 
     new Label(parent, "Keys", "sans-bold");
-    addText("Up / Down : throttle forward / reverse");
-    addText("Left / Right : steer");
+    addText("Up / Down : throttle forward / reverse (both tracks together in tank mode)");
+    addText("Left / Right : steer; in tank mode they bias the tracks under throttle, and pivot on the spot without it");
     addText("Space : brake");
     addText("D : drop the car flat, T : rolled 20 degrees, N : on the ramp");
     addText("K : push it down, F : forward, S : sideways");
+
+    new Label(parent, "Drive mode", "sans-bold");
+
+    ComboBox* driveMode = new ComboBox(parent, {"Car (front steer, rear drive)", "Tank (skid steer, all driven)"});
+    driveMode->set_fixed_width(230);
+    driveMode->set_selected_index(mDriveMode == DriveMode::Car ? 0 : 1);
+    driveMode->set_callback([this](int index) {
+        mDriveMode = (index == 0) ? DriveMode::Car : DriveMode::Tank;
+    });
 
     new Label(parent, "Tuning", "sans-bold");
 
@@ -470,10 +508,13 @@ void VehicleScene::createGuiWidgets(nanogui::Widget* parent) {
     addSlider("Frequency (Hz)", mFrequency, 0.5f, 4.0f, 2);
     addSlider("Damping ratio", mDampingRatio, 0.0f, 2.0f, 2);
     addSlider("Chassis mass (kg)", mMassKg, 200.0f, 3000.0f, 0);
-    addSlider("Tire friction", mTireFriction, 0.0f, 2.0f, 2);
+    addSlider("Longitudinal friction", mLongitudinalFriction, 0.0f, 2.0f, 2);
+    addSlider("Lateral friction", mLateralFriction, 0.0f, 2.0f, 2);
+    addSlider("Cornering stiffness (per rad)", mCorneringStiffness, 0.5f, 20.0f, 1);
     addSlider("Engine torque per wheel (Nm)", mEngineTorque, 0.0f, 3000.0f, 0);
     addSlider("Brake torque per wheel (Nm)", mBrakeTorque, 0.0f, 5000.0f, 0);
     addSlider("Steering lock (deg)", mMaxSteerDeg, 5.0f, 45.0f, 0);
+    addSlider("Tank inner track power", mInnerTrackPower, 0.0f, 1.0f, 2);
     addSlider("Contact samples per wheel", mContactSamples, 1.0f, 7.0f, 0);
 
     CheckBox* limiter = new CheckBox(parent, "Roll-over limiter (45 deg cone)");

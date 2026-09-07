@@ -50,18 +50,34 @@ You can find the user manual and the Doxygen API documentation <a href="https://
 
 ## Building
 
-### Windows + MSYS MINGW
+### Windows + MSYS2 MINGW64
 
-- Create the build directory.
+Build from a **MINGW64** shell, not the MSYS shell.
 
-Generate a Make file with Ninja?
-``` mkdir build && cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DRP3D_COMPILE_TESTBED=ON -DCMAKE_EXE_LINKER_FLAGS="-static -static-libgcc -static-libstdc++" ```
+- Install the toolchain. This must be the ```mingw-w64-x86_64``` CMake, *not* the ```msys``` one: the MSYS build reports a POSIX platform (```UNIX=1```, ```WIN32``` unset), which makes GLFW pick its X11 backend and fail the configure with ```Could NOT find X11```.
 
-Will create a library ```.a``` file and the testbed will get statically linked to the MSYS dependencies.
+```pacman -Syu```
+```pacman -S mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake mingw-w64-x86_64-make```
 
-Then build with:
+```mingw-w64-x86_64-cmake``` depends on ```mingw-w64-x86_64-ninja```, so Ninja gets installed too and is CMake's default generator here. Run the ```-Syu``` first: MSYS2 does not support partial upgrades, and a freshly installed package built against a newer GCC will fail to start with a missing DLL entry point.
 
-```cmake --build build -j```
+- If you want the testbed, checkout the nanogui submodule:
+
+```git submodule update --init --recursive```
+
+- Generate the build files. Swap in ```-G Ninja``` if you prefer:
+
+```cmake -S . -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DRP3D_COMPILE_TESTBED=ON -DCMAKE_EXE_LINKER_FLAGS="-static -static-libgcc -static-libstdc++"```
+
+- Then build with:
+
+```CMAKE_POLICY_VERSION_MINIMUM=3.5 cmake --build build -j```
+
+The environment variable is only needed for the testbed. nanogui's ```resources/bin2c.cmake``` declares ```cmake_minimum_required (VERSION 2.8.12)``` and CMake 4 removed support for anything below 3.5. It has to be an environment variable rather than a ```-D``` flag because CMake runs that script through a nested ```cmake -P``` invocation, which a cache variable does not reach.
+
+This produces the ```libreactphysics3d.a``` library plus ```build/testbed/testbed.exe```, statically linked against the MinGW runtime so it needs no MSYS2 DLLs to run.
+
+Note that the ```.a``` is not ABI-compatible across GCC major versions. Anything linking it has to be built with the same MinGW GCC major version used here.
 
 ## Branches
 
