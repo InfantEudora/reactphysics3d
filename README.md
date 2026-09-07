@@ -48,9 +48,20 @@
 
 You can find the user manual and the Doxygen API documentation <a href="https://www.reactphysics3d.com/documentation" target="_blank">here</a>.
 
-Instructions how to build and install library can be found in the file
-<a href="https://www.reactphysics3d.com/documentation/UserDocumentation.md"
-target="_blank">UserDocumentation.md</a>.
+## Building
+
+### Windows + MSYS MINGW
+
+- Create the build directory.
+
+Generate a Make file with Ninja?
+``` mkdir build && cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DRP3D_COMPILE_TESTBED=ON -DCMAKE_EXE_LINKER_FLAGS="-static -static-libgcc -static-libstdc++" ```
+
+Will create a library ```.a``` file and the testbed will get statically linked to the MSYS dependencies.
+
+Then build with:
+
+```cmake --build build -j```
 
 ## Branches
 
