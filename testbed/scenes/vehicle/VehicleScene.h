@@ -107,6 +107,8 @@ class VehicleScene : public SceneDemo {
         float mLongitudinalFriction;   // friction coefficient along the rolling direction
         float mLateralFriction;        // friction coefficient across it
         float mCorneringStiffness;     // sideways force per radian of slip angle, times the normal force
+        float mSlidingFrictionRatio;   // fraction of the peak coefficients a fully sliding tire keeps
+        float mPeakSlipRatio;          // longitudinal slip ratio at which grip peaks
         float mEngineTorque;     // N.m per driven wheel at full throttle
         float mBrakeTorque;      // N.m per wheel when braking
         float mMaxSteerDeg;      // steering lock of the front wheels, car mode only

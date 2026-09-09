@@ -143,6 +143,30 @@ class TestVehicleConstraint : public Test {
             mVehicle->getWheel(3).setDriveTorque(torque);
         }
 
+        /// Set the fraction of its peak grip a fully sliding tire keeps, on every wheel
+        void setSlidingFrictionRatio(decimal ratio) {
+            for (uint32 i = 0; i < 4; i++) {
+                mVehicle->getWheel(i).getSettings().slidingFrictionRatio = ratio;
+            }
+        }
+
+        /// Set the steer angle of the front wheels
+        void steerFront(decimal angle) {
+            mVehicle->getWheel(0).setSteerAngle(angle);
+            mVehicle->getWheel(1).setSteerAngle(angle);
+        }
+
+        /// Set the brake torque of the front wheels only
+        void brakeFront(decimal torque) {
+            mVehicle->getWheel(0).setBrakeTorque(torque);
+            mVehicle->getWheel(1).setBrakeTorque(torque);
+        }
+
+        /// Yaw rate of the chassis about its own up axis (rad/s), positive to the left
+        decimal yawRate() const {
+            return mChassis->getAngularVelocity().dot(up());
+        }
+
         /// Set the brake torque of all wheels
         void brakeAll(decimal torque) {
             for (uint32 i = 0; i < 4; i++) {
@@ -171,6 +195,12 @@ class TestVehicleConstraint : public Test {
             testHardStop();
             testDrive();
             testWheelspin();
+            testGripFallsOffPastPeakSlip();
+            testSlideRunsOnAfterLiftOff();
+            testBrakingWhileSteeringDoesNotYawAwayFromTheSteer();
+            testSlidingTireSharesGripAlongTheSlip();
+            testCorneringWheelStillRollsWithTheGround();
+            testSkidSteerHoldsAnArc();
             testBrake();
             testSteering();
             testWheelTransform();
@@ -435,11 +465,306 @@ class TestVehicleConstraint : public Test {
             for (uint32 i = 2; i < 4; i++) {
                 const VehicleWheel& wheel = mVehicle->getWheel(i);
                 rp3d_test(wheel.getAngularVelocity() * RADIUS > decimal(1.5) * forwardSpeed);
-                rp3d_test(std::abs(wheel.getLongitudinalImpulse() - wheel.getSettings().longitudinalFriction * wheel.getNormalImpulse()) < decimal(1e-3));
+                // At the limit of the grip it has left: a wheel spinning this far past the peak
+                // slip is sliding, so only slidingFrictionRatio of the peak coefficient is there
+                rp3d_test(wheel.getGripScale() < decimal(1.0));
+                rp3d_test(std::abs(wheel.getLongitudinalImpulse() -
+                                   wheel.getSettings().longitudinalFriction * wheel.getGripScale() * wheel.getNormalImpulse()) < decimal(1e-3));
             }
             // The front wheels still roll with the ground
             for (uint32 i = 0; i < 2; i++) {
                 rp3d_test(std::abs(mVehicle->getWheel(i).getAngularVelocity() * RADIUS - forwardSpeed) < forwardSpeed * decimal(0.05));
+            }
+
+            destroyScene();
+        }
+
+        /// Grip peaks at a small slip and falls away past it: a tire rolling or cornering within
+        /// its peak has all of its grip, one spinning, locked or sliding sideways has only
+        /// slidingFrictionRatio of it, and the loss shows up in both directions at once
+        void testGripFallsOffPastPeakSlip() {
+
+            // ---------- Rolling and cornering below the peak: nothing is lost ---------- //
+
+            createScene(Quaternion::identity(), decimal(1.3));
+            step(180);
+            mChassis->setLinearVelocity(Vector3(0, 0, 5));
+            step(60);
+            for (uint32 i = 0; i < 4; i++) {
+                const VehicleWheel& wheel = mVehicle->getWheel(i);
+                rp3d_test(wheel.getCombinedSlip() < decimal(1.0));
+                rp3d_test(std::abs(wheel.getGripScale() - decimal(1.0)) < decimal(1e-6));
+            }
+
+            // A slip angle inside the saturation angle (lateralFriction / corneringStiffness,
+            // about 8 degrees with the defaults) is still elastic tread shear, not sliding
+            mChassis->setLinearVelocity(Vector3(decimal(0.3), 0, 5));
+            step(1);
+            for (uint32 i = 0; i < 4; i++) {
+                const VehicleWheel& wheel = mVehicle->getWheel(i);
+                rp3d_test(wheel.getLateralSlipAngle() < wheel.getSettings().lateralFriction / wheel.getSettings().corneringStiffness);
+                rp3d_test(std::abs(wheel.getGripScale() - decimal(1.0)) < decimal(1e-6));
+            }
+            destroyScene();
+
+            // ---------- Sliding sideways: grip falls towards the sliding fraction ---------- //
+
+            createScene(Quaternion::identity(), decimal(1.3));
+            setSlidingFrictionRatio(decimal(0.6));
+            step(180);
+            // Sideways far past the saturation angle, so the tires are sliding, not shearing
+            mChassis->setLinearVelocity(Vector3(8, 0, 0));
+            step(1);
+            for (uint32 i = 0; i < 4; i++) {
+                const VehicleWheel& wheel = mVehicle->getWheel(i);
+                rp3d_test(wheel.getCombinedSlip() > decimal(1.0));
+                rp3d_test(wheel.getGripScale() > decimal(0.6) && wheel.getGripScale() < decimal(1.0));
+                // The sideways force is the friction limit as reduced by the falloff, not the
+                // linear rise of the cornering stiffness, which saturated long before
+                const decimal expected = wheel.getSettings().lateralFriction * wheel.getGripScale() * wheel.getNormalImpulse();
+                rp3d_test(std::abs(std::abs(wheel.getLateralImpulse()) - expected) < expected * decimal(0.02));
+            }
+            destroyScene();
+
+            // ---------- The loss is shared between the two directions ---------- //
+
+            // The same sideways slide in two cars, one with the falloff and one without, both
+            // braking hard. The slide alone puts the tires well past their peak slip, so the car
+            // with the falloff has a smaller budget for the brakes to draw on and does not slow
+            // down as well: grip lost sideways is grip lost in the rolling direction too.
+            decimal brakedSpeed[2];
+            for (int withFalloff = 0; withFalloff < 2; withFalloff++) {
+
+                createScene(Quaternion::identity(), decimal(1.3));
+                setSlidingFrictionRatio(withFalloff ? decimal(0.6) : decimal(1.0));
+                step(180);
+                mChassis->setLinearVelocity(Vector3(8, 0, 5));
+                brakeAll(decimal(10000.0));
+                step(20);
+                brakedSpeed[withFalloff] = mChassis->getLinearVelocity().dot(forward());
+                destroyScene();
+            }
+            rp3d_test(brakedSpeed[1] > brakedSpeed[0] + decimal(0.5));
+
+            // ---------- A locked wheel stops the car less well than the peak would ---------- //
+
+            decimal stopSpeed[2];
+            for (int withFalloff = 0; withFalloff < 2; withFalloff++) {
+
+                createScene(Quaternion::identity(), decimal(1.3));
+                setSlidingFrictionRatio(withFalloff ? decimal(0.6) : decimal(1.0));
+                step(120);
+                mChassis->setLinearVelocity(Vector3(0, 0, 5));
+                step(30);
+                brakeAll(decimal(10000.0));
+                step(20);
+                for (uint32 i = 0; i < 4; i++) {
+                    rp3d_test(std::abs(mVehicle->getWheel(i).getAngularVelocity()) < decimal(0.1));
+                }
+                stopSpeed[withFalloff] = mChassis->getLinearVelocity().z;
+                destroyScene();
+            }
+            rp3d_test(stopSpeed[1] > stopSpeed[0] + decimal(0.1));
+
+            // ---------- Disabled falloff is the old single-coefficient model ---------- //
+
+            createScene(Quaternion::identity(), decimal(1.3));
+            setSlidingFrictionRatio(decimal(1.0));
+            step(120);
+            driveRear(decimal(3000.0));
+            step(60);
+            for (uint32 i = 0; i < 4; i++) {
+                // The slip is still measured (the split of the grip between the two
+                // directions needs it), it just no longer costs the tire anything
+                rp3d_test(std::abs(mVehicle->getWheel(i).getGripScale() - decimal(1.0)) < decimal(1e-6));
+            }
+            for (uint32 i = 2; i < 4; i++) {
+                const VehicleWheel& wheel = mVehicle->getWheel(i);
+                rp3d_test(std::abs(wheel.getLongitudinalImpulse() -
+                                   wheel.getSettings().longitudinalFriction * wheel.getNormalImpulse()) < decimal(1e-3));
+            }
+            destroyScene();
+        }
+
+        /// A slide runs on after the throttle closes instead of snapping straight: the tires are
+        /// past their peak slip and do not get their full grip back until the slip comes down
+        void testSlideRunsOnAfterLiftOff() {
+
+            decimal driftAfterLift[2];
+            for (int withFalloff = 0; withFalloff < 2; withFalloff++) {
+
+                createScene(Quaternion::identity(), decimal(1.3));
+                setSlidingFrictionRatio(withFalloff ? decimal(0.6) : decimal(1.0));
+                step(120);
+
+                // Power oversteer: steering on, far more torque at the rear than the tires hold
+                mChassis->setLinearVelocity(Vector3(0, 0, 12));
+                mVehicle->getWheel(0).setSteerAngle(decimal(0.5));
+                mVehicle->getWheel(1).setSteerAngle(decimal(0.5));
+                driveRear(decimal(3000.0));
+                step(60);
+                rp3d_test(std::abs(mChassis->getLinearVelocity().dot(right())) > decimal(5.0));
+
+                // Off the throttle: half a second later, how much of the slide is left
+                driveRear(decimal(0.0));
+                step(30);
+                driftAfterLift[withFalloff] = std::abs(mChassis->getLinearVelocity().dot(right()));
+                destroyScene();
+            }
+
+            // A tire that keeps its full grip however hard it is sliding gathers the car up
+            // much sooner
+            rp3d_test(driftAfterLift[1] > driftAfterLift[0] * decimal(1.5));
+        }
+
+        /// Braking into a corner does not yaw the car away from the steering. A tire braked past
+        /// its limit slides, and a sliding tire's friction opposes the way it slides -- almost
+        /// straight down the road -- so locked front wheels plough on rather than steering. What
+        /// they must not do is turn the car the other way, which is what a braking force pinned
+        /// to the wheel's steered heading with no cornering force beside it would do.
+        void testBrakingWhileSteeringDoesNotYawAwayFromTheSteer() {
+
+            createScene(Quaternion::identity(), decimal(1.3));
+            step(120);
+            mChassis->setLinearVelocity(Vector3(0, 0, 3));
+            step(30);
+
+            // Steer left, and brake hard on the front axle alone so the front tires are asked
+            // for far more than they can hold while they are also asked to corner
+            const decimal steerAngle = decimal(35.0) * PI_RP3D / decimal(180.0);
+            steerFront(steerAngle);
+            brakeFront(decimal(10000.0));
+
+            decimal peakYaw = decimal(0.0);
+            decimal worstSlipAngle = decimal(0.0);
+            bool sawStarvedFrontTire = false;
+            for (int i = 0; i < 60; i++) {
+                step(1);
+                if (std::abs(yawRate()) > std::abs(peakYaw)) peakYaw = yawRate();
+                for (uint32 w = 0; w < 2; w++) {
+                    const VehicleWheel& wheel = mVehicle->getWheel(w);
+                    if (!wheel.hasContact()) continue;
+                    worstSlipAngle = std::max(worstSlipAngle, wheel.getLateralSlipAngle());
+                    // Sliding well past the peak and yet given no sideways force at all is the
+                    // degenerate split this guards against
+                    sawStarvedFrontTire |= wheel.getCombinedSlip() > decimal(2.0) &&
+                                           std::abs(wheel.getLateralImpulse()) < decimal(1e-6) &&
+                                           wheel.getLateralSlipAngle() > decimal(0.2);
+                }
+            }
+
+            // The front tires really were slipping hard, so the case was exercised
+            rp3d_test(worstSlipAngle > decimal(0.4));
+            rp3d_test(!sawStarvedFrontTire);
+
+            // Straight on, or gently into the steer: never a hard turn the other way. Steering
+            // left is a positive yaw, so away from the steer is negative.
+            rp3d_test(peakYaw > decimal(-0.05));
+
+            destroyScene();
+        }
+
+        /// The grip of a sliding tire is split along the way it slides, not handed to whichever
+        /// direction the solver happens to reach first
+        void testSlidingTireSharesGripAlongTheSlip() {
+
+            createScene(Quaternion::identity(), decimal(1.3));
+            step(180);
+
+            // Sliding sideways and braking at once: both directions are asked for more than the
+            // tire has, so the split is entirely up to the sharing rule
+            mChassis->setLinearVelocity(Vector3(8, 0, 5));
+            brakeAll(decimal(10000.0));
+            step(1);
+
+            for (uint32 i = 0; i < 4; i++) {
+                const VehicleWheel& wheel = mVehicle->getWheel(i);
+                rp3d_test(wheel.hasContact());
+                rp3d_test(wheel.getSlidingFraction() > decimal(0.8));
+
+                // Both directions carry force, in the proportions of the slip direction
+                const decimal normalImpulse = wheel.getNormalImpulse();
+                const decimal gripScale = wheel.getGripScale();
+                const decimal along = std::abs(wheel.getLongitudinalImpulse()) /
+                                      (wheel.getSettings().longitudinalFriction * gripScale * normalImpulse);
+                const decimal across = std::abs(wheel.getLateralImpulse()) /
+                                       (wheel.getSettings().lateralFriction * gripScale * normalImpulse);
+                rp3d_test(along > decimal(0.05) && across > decimal(0.05));
+                rp3d_test(std::abs(along - wheel.getLongitudinalGripShare()) < decimal(0.1));
+                rp3d_test(std::abs(across - wheel.getLateralGripShare()) < decimal(0.1));
+
+                // And the pair is still inside the friction ellipse
+                rp3d_test(along * along + across * across < decimal(1.02));
+            }
+
+            destroyScene();
+        }
+
+        /// Sharing the grip along the slip must not starve the rolling direction of what it needs
+        /// to keep the wheel turning with the ground: a tire cornering past its peak slip angle is
+        /// sliding almost purely sideways, so its share along the rolling direction is nearly
+        /// nothing, and yet its wheel must go on rolling
+        void testCorneringWheelStillRollsWithTheGround() {
+
+            createScene(Quaternion::identity(), decimal(1.3));
+            step(180);
+
+            // Rolling forward, then pushed sideways hard enough for a slip angle well past the
+            // peak. No brake or drive torque anywhere: the only thing asking for force along the
+            // rolling direction is the wheel keeping step with the ground.
+            mChassis->setLinearVelocity(Vector3(0, 0, 6));
+            step(60);
+            mChassis->setLinearVelocity(mChassis->getLinearVelocity() + right() * decimal(3.0));
+
+            bool sawSidewaysSlide = false;
+            for (int i = 0; i < 30; i++) {
+                step(1);
+                const decimal forwardSpeed = mChassis->getLinearVelocity().dot(forward());
+                for (uint32 w = 0; w < 4; w++) {
+                    const VehicleWheel& wheel = mVehicle->getWheel(w);
+                    if (!wheel.hasContact()) continue;
+                    sawSidewaysSlide |= wheel.getSlidingFraction() > decimal(0.5) &&
+                                        wheel.getLateralGripShare() > decimal(0.8);
+                    // Still rolling with the ground, all the way through the slide
+                    rp3d_test(std::abs(wheel.getAngularVelocity() * RADIUS - forwardSpeed) < forwardSpeed * decimal(0.1));
+                }
+            }
+            rp3d_test(sawSidewaysSlide);
+
+            destroyScene();
+        }
+
+        /// Skid steering: with no steer angle at all, more drive torque down one side than the
+        /// other turns the vehicle and holds it in a steady arc. The tires do that on slip angle
+        /// alone, well past their peak, while they are also being driven -- so it is the case that
+        /// sharing the grip along the slip could break by leaving nothing for the rolling
+        /// direction, and it is how a tank steers.
+        void testSkidSteerHoldsAnArc() {
+
+            createScene(Quaternion::identity(), decimal(1.3));
+            step(120);
+
+            // Wheels 0 and 2 are the left pair, 1 and 3 the right
+            for (uint32 i = 0; i < 4; i++) {
+                mVehicle->getWheel(i).setDriveTorque((i % 2 == 0) ? decimal(600.0) : decimal(200.0));
+            }
+            step(120);
+
+            // Driving the left side harder turns the vehicle to the right, which is a negative yaw
+            rp3d_test(yawRate() < decimal(-0.1));
+            // And it is going somewhere while it does it, not just spinning on the spot
+            rp3d_test(mChassis->getLinearVelocity().dot(forward()) > decimal(1.0));
+
+            // Steady: the arc is held rather than winding up or dying away
+            const decimal yawBefore = yawRate();
+            step(60);
+            rp3d_test(std::abs(yawRate() - yawBefore) < std::abs(yawBefore) * decimal(0.5));
+
+            // The driven wheels are still transmitting torque to the ground while cornering
+            for (uint32 i = 0; i < 4; i++) {
+                const VehicleWheel& wheel = mVehicle->getWheel(i);
+                rp3d_test(wheel.hasContact());
+                rp3d_test(wheel.getLongitudinalImpulse() > decimal(0.0));
             }
 
             destroyScene();

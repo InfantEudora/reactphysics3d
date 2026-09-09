@@ -67,6 +67,7 @@ VehicleScene::VehicleScene(const std::string& name, EngineSettings& settings, re
         mFloor(nullptr), mRamp(nullptr), mChassis(nullptr), mVehicle(nullptr), mRollOverLimiter(nullptr),
         mFrequency(1.5f), mDampingRatio(0.5f), mMassKg(1000.0f),
         mLongitudinalFriction(1.0f), mLateralFriction(1.0f), mCorneringStiffness(7.0f),
+        mSlidingFrictionRatio(0.8f), mPeakSlipRatio(0.12f),
         mEngineTorque(600.0f), mBrakeTorque(1500.0f), mMaxSteerDeg(30.0f),
         mDriveMode(DriveMode::Car), mInnerTrackPower(0.3f),
         mContactSamples(1.0f), mUseRollOverLimiter(false),
@@ -237,6 +238,8 @@ void VehicleScene::applySettings() {
         wheel.longitudinalFriction = mLongitudinalFriction;
         wheel.lateralFriction = mLateralFriction;
         wheel.corneringStiffness = mCorneringStiffness;
+        wheel.slidingFrictionRatio = mSlidingFrictionRatio;
+        wheel.peakSlipRatio = mPeakSlipRatio;
         wheel.maxSteerAngle = mMaxSteerDeg * DEG;
         wheel.numContactSamples = static_cast<rp3d::uint32>(mContactSamples + 0.5f);
     }
@@ -402,7 +405,11 @@ void VehicleScene::update() {
                      << ", F " << (wheel.getLongitudinalImpulse() / timeStep)
                      << ", S " << (wheel.getLateralImpulse() / timeStep)
                      << std::setprecision(1) << ", v " << (wheel.getAngularVelocity() * wheel.getSettings().radius)
-                     << ", slip " << (wheel.getLateralSlipAngle() / DEG) << " deg";
+                     << ", slip " << (wheel.getLateralSlipAngle() / DEG) << " deg"
+                     << std::setprecision(2) << " / " << wheel.getCombinedSlip()
+                     << ", grip " << wheel.getGripScale()
+                     << ", slide " << wheel.getSlidingFraction()
+                     << " (" << wheel.getLongitudinalGripShare() << "/" << wheel.getLateralGripShare() << ")";
             }
             else {
                 line << "in the air, v " << std::fixed << std::setprecision(1) << (wheel.getAngularVelocity() * wheel.getSettings().radius);
@@ -511,6 +518,8 @@ void VehicleScene::createGuiWidgets(nanogui::Widget* parent) {
     addSlider("Longitudinal friction", mLongitudinalFriction, 0.0f, 2.0f, 2);
     addSlider("Lateral friction", mLateralFriction, 0.0f, 2.0f, 2);
     addSlider("Cornering stiffness (per rad)", mCorneringStiffness, 0.5f, 20.0f, 1);
+    addSlider("Sliding friction ratio", mSlidingFrictionRatio, 0.2f, 1.0f, 2);
+    addSlider("Peak slip ratio", mPeakSlipRatio, 0.02f, 0.5f, 2);
     addSlider("Engine torque per wheel (Nm)", mEngineTorque, 0.0f, 3000.0f, 0);
     addSlider("Brake torque per wheel (Nm)", mBrakeTorque, 0.0f, 5000.0f, 0);
     addSlider("Steering lock (deg)", mMaxSteerDeg, 5.0f, 45.0f, 0);

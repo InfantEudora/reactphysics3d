@@ -80,6 +80,25 @@ Quaternion rotationAboutAxis(const Vector3& axis, decimal angle) {
     return Quaternion(axis * std::sin(halfAngle), std::cos(halfAngle));
 }
 
+// Floor (m/s) on the speed the longitudinal slip ratio is measured against, so that a tire
+// barely moving does not report a large slip from a small velocity difference
+const decimal MIN_SLIP_REFERENCE_SPEED = decimal(1.0);
+
+// Fraction of its peak friction coefficient a tire has left at a combined slip of
+// `combinedSlip` (1 being the slip at which grip peaks), falling from 1 at the peak towards
+// `slidingRatio` as the contact patch goes over to sliding. Below the peak the tire has all of
+// its grip: the slip there is elastic shear of the tread, not sliding, and it is the impulse
+// the solver asks for rather than this limit that keeps the force small.
+decimal gripScaleAtSlip(decimal combinedSlip, decimal slidingRatio) {
+
+    if (combinedSlip <= decimal(1.0)) return decimal(1.0);
+
+    // 2s / (1 + s^2): 1 at the peak, falling away past it like the tail of the usual tire
+    // curves, so grip is lost smoothly instead of at a cliff edge
+    const decimal peakShape = decimal(2.0) * combinedSlip / (decimal(1.0) + combinedSlip * combinedSlip);
+    return slidingRatio + (decimal(1.0) - slidingRatio) * peakShape;
+}
+
 }
 
 // Constructor
@@ -152,6 +171,11 @@ void SolveVehicleSystem::initBeforeSolve() {
                 wheel.mLongitudinalPart.deactivate();
                 wheel.mLateralPart.deactivate();
                 wheel.mLateralSlipAngle = decimal(0.0);
+                wheel.mCombinedSlip = decimal(0.0);
+                wheel.mGripScale = decimal(1.0);
+                wheel.mSlidingFraction = decimal(0.0);
+                wheel.mLongitudinalGripShare = decimal(0.0);
+                wheel.mLateralGripShare = decimal(0.0);
             }
             continue;
         }
@@ -255,6 +279,11 @@ void SolveVehicleSystem::initWheel(VehicleConstraint& vehicle, VehicleWheel& whe
         wheel.mLongitudinalPart.deactivate();
         wheel.mLateralPart.deactivate();
         wheel.mLateralSlipAngle = decimal(0.0);
+        wheel.mCombinedSlip = decimal(0.0);
+        wheel.mGripScale = decimal(1.0);
+        wheel.mSlidingFraction = decimal(0.0);
+        wheel.mLongitudinalGripShare = decimal(0.0);
+        wheel.mLateralGripShare = decimal(0.0);
         return;
     }
 
@@ -308,6 +337,78 @@ void SolveVehicleSystem::initWheel(VehicleConstraint& vehicle, VehicleWheel& whe
     const Vector3 slipVelocity = contactPointVelocity - groundPointVelocity;
     wheel.mLateralSlipAngle = std::atan2(std::abs(wheel.mContactLateral.dot(slipVelocity)),
                                          std::abs(wheel.mContactLongitudinal.dot(slipVelocity)));
+
+    // ---------- Combined slip, and how the grip is shared along it ---------- //
+
+    // The slip the step starts with decides both how much grip the tire has and how that grip
+    // is divided between its two directions. Like the slip angle above it is measured once,
+    // from the velocities the step begins with, rather than inside the solver: a limit that
+    // fell as the solver removed the very slip it was computed from would chase itself from
+    // iteration to iteration.
+
+    // Slip ratio along the rolling direction: how fast the tread runs against the road,
+    // against the faster of road speed and tread speed. That denominator keeps it inside
+    // [-1, 1] and finite at a standstill, where a slip ratio against road speed alone would
+    // blow up (a wheel spinning up from rest is fully slipping, which is the right answer, and
+    // one creeping along on an idling engine is not).
+    const decimal roadSpeed = wheel.mContactLongitudinal.dot(slipVelocity);
+    const decimal treadSpeed = wheel.mAngularVelocity * settings.radius;
+    const decimal referenceSpeed = std::max(std::max(std::abs(roadSpeed), std::abs(treadSpeed)), MIN_SLIP_REFERENCE_SPEED);
+    const decimal slipRatio = (treadSpeed - roadSpeed) / referenceSpeed;
+
+    // Each direction is normalized by its own peak slip and the two combined, so slip in one
+    // direction counts against the other as well. The peak slip angle is the one
+    // corneringStiffness already implies: the angle at which the linear rise of the sideways
+    // force reaches the friction limit.
+    const decimal peakSlipRatio = std::max(settings.peakSlipRatio, MACHINE_EPSILON);
+    const decimal peakSlipAngle = settings.corneringStiffness > MACHINE_EPSILON ?
+                                  settings.lateralFriction / settings.corneringStiffness : PI_RP3D;
+    const decimal normalizedRatio = slipRatio / peakSlipRatio;
+    const decimal normalizedAngle = peakSlipAngle > MACHINE_EPSILON ? wheel.mLateralSlipAngle / peakSlipAngle : decimal(0.0);
+    wheel.mCombinedSlip = std::sqrt(normalizedRatio * normalizedRatio + normalizedAngle * normalizedAngle);
+
+    // Grip peaks at that slip and falls away past it, so both friction coefficients of this
+    // step are scaled by what the tire has left
+    wheel.mGripScale = settings.slidingFrictionRatio < decimal(1.0) ?
+                       gripScaleAtSlip(wheel.mCombinedSlip, settings.slidingFrictionRatio) : decimal(1.0);
+
+    // How the grip is shared between the two directions once the tire slides. A gripping tire
+    // shears its tread elastically and each direction builds force with its own stiffness, so
+    // the two are only coupled through the ellipse. A sliding one has no adhesion left to shear
+    // and its friction simply opposes the way the patch is sliding, which fixes the direction of
+    // the force and hence how the ellipse is divided. mSlidingFraction is how far between the
+    // two the tire is, and the shares are the components of the sliding direction.
+    //
+    // Without this the sideways direction can be starved outright. The two are solved one after
+    // the other, the rolling direction first, and that has a degenerate fixed point: with no
+    // sideways impulse yet, braking or drive at the limit takes the whole budget, which leaves
+    // nothing sideways, which keeps the sideways impulse at zero. The surviving force then
+    // points along the wheel's steered heading whatever the tire is really doing, and a braked
+    // steered wheel pushes the nose out of the turn by F.sin(steer angle) with no cornering
+    // force to set against it: braking into a corner yaws the car away from the steering. A
+    // real tire, sliding, opposes its slip velocity, which points down the road, so it hardly
+    // turns the car at all. Sharing along the slip direction also makes the split independent
+    // of which direction is solved first.
+    wheel.mSlidingFraction = wheel.mCombinedSlip > decimal(1.0) ?
+                             decimal(1.0) - decimal(1.0) / wheel.mCombinedSlip : decimal(0.0);
+
+    // The direction the tread slides in, measured raw rather than through the peak slips used
+    // for mCombinedSlip above: a tire past its peak is losing the elastic shear that makes its
+    // two directions differ, and a fully sliding one is plain kinetic friction, which has no
+    // preferred direction at all.
+    const decimal patchSlipLongitudinal = roadSpeed - treadSpeed;
+    const decimal patchSlipLateral = wheel.mContactLateral.dot(slipVelocity);
+    const decimal patchSlipSpeed = std::sqrt(patchSlipLongitudinal * patchSlipLongitudinal +
+                                             patchSlipLateral * patchSlipLateral);
+    if (patchSlipSpeed > MACHINE_EPSILON) {
+        wheel.mLongitudinalGripShare = std::abs(patchSlipLongitudinal) / patchSlipSpeed;
+        wheel.mLateralGripShare = std::abs(patchSlipLateral) / patchSlipSpeed;
+    }
+    else {
+        // Not sliding anywhere, so nothing to share out (mSlidingFraction is 0 here anyway)
+        wheel.mLongitudinalGripShare = decimal(0.0);
+        wheel.mLateralGripShare = decimal(0.0);
+    }
 
     // ---------- Suspension spring ---------- //
 
@@ -479,6 +580,20 @@ static decimal remainingGripFactor(decimal otherImpulse, decimal otherMaxImpulse
     return std::sqrt(std::max(decimal(0.0), decimal(1.0) - used * used));
 }
 
+// Fraction of its own friction limit one direction of a tire may use this step: what the other
+// direction leaves it, faded towards the share of the ellipse that lies along the way the patch
+// is sliding as the tire goes over to sliding (see VehicleWheel::mSlidingFraction). Fully
+// sliding this is the slip direction alone, so the two directions together produce one force
+// opposing the slide whichever of them is solved first; gripping it is the sequential split as
+// before, which is what keeps a cornering tire able to be driven and its wheel able to stay in
+// step with the ground. Either way the pair stays inside the friction ellipse.
+static decimal gripBudgetFactor(decimal slidingFraction, decimal slipShare, decimal otherImpulse,
+                                decimal otherMaxImpulse) {
+
+    const decimal remaining = remainingGripFactor(otherImpulse, otherMaxImpulse);
+    return remaining + slidingFraction * (slipShare - remaining);
+}
+
 // Solve the longitudinal tire friction of the wheels of a vehicle (and update their spin)
 void SolveVehicleSystem::solveLongitudinalFriction(VehicleConstraint& vehicle, const AxisConstraintBody& chassis) {
 
@@ -491,10 +606,14 @@ void SolveVehicleSystem::solveLongitudinalFriction(VehicleConstraint& vehicle, c
         const AxisConstraintBody ground = makeGroundBody(wheel);
 
         // The most the tire can transmit this step, from the normal impulse so far, less whatever
-        // share of the grip the sideways direction is already using
-        const decimal maxFrictionImpulse = settings.longitudinalFriction * wheel.getNormalImpulse() *
-                                           remainingGripFactor(wheel.mLateralPart.getTotalLambda(),
-                                                               settings.lateralFriction * wheel.getNormalImpulse());
+        // the tire has lost to slipping (a locked or spinning wheel holds the car back less well
+        // than one right at the limit), and sharing the rest with the sideways direction: what
+        // that direction is not using, less the share a sliding tire owes the way it is sliding.
+        const decimal normalImpulse = wheel.getNormalImpulse();
+        const decimal maxFrictionImpulse = settings.longitudinalFriction * wheel.mGripScale * normalImpulse *
+                                           gripBudgetFactor(wheel.mSlidingFraction, wheel.mLongitudinalGripShare,
+                                                            wheel.mLateralPart.getTotalLambda(),
+                                                            settings.lateralFriction * wheel.mGripScale * normalImpulse);
 
         // Velocity of the chassis at the tire relative to the ground, along the rolling direction
         const Vector3 chassisPointVelocity = *chassis.linearVelocity + chassis.angularVelocity->cross(wheel.mR2);
@@ -553,9 +672,14 @@ void SolveVehicleSystem::solveLateralFriction(VehicleConstraint& vehicle, const 
         // the heading error instead of being all or nothing.
         const VehicleWheelSettings& settings = wheel.mSettings;
         const decimal normalImpulse = wheel.getNormalImpulse();
-        const decimal gripLimit = settings.lateralFriction * normalImpulse *
-                                  remainingGripFactor(wheel.mLongitudinalPart.getTotalLambda(),
-                                                      settings.longitudinalFriction * normalImpulse);
+        const decimal gripLimit = settings.lateralFriction * wheel.mGripScale * normalImpulse *
+                                  gripBudgetFactor(wheel.mSlidingFraction, wheel.mLateralGripShare,
+                                                   wheel.mLongitudinalPart.getTotalLambda(),
+                                                   settings.longitudinalFriction * wheel.mGripScale * normalImpulse);
+
+        // The linear rise is the tire's stiffness at small slip and is not scaled: what the
+        // falloff takes away is the ceiling that rise runs into, so the sideways force peaks at
+        // the saturation angle and then decays with slip instead of staying pinned at the limit.
         const decimal maxImpulse = std::min(settings.corneringStiffness * wheel.mLateralSlipAngle * normalImpulse,
                                             gripLimit);
         wheel.mLateralPart.solveVelocityConstraint(ground, chassis, wheel.mContactLateral, -maxImpulse, maxImpulse);

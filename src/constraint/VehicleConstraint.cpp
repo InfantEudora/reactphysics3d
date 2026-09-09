@@ -43,6 +43,8 @@ VehicleWheel::VehicleWheel(const VehicleWheelSettings& settings)
                mContactPoint(0, 0, 0), mContactNormal(0, 1, 0), mContactLongitudinal(0, 0, 1), mContactLateral(-1, 0, 0),
                mR1(0, 0, 0), mR2(0, 0, 0), mAxlePlaneConstant(decimal(0.0)),
                mSuspensionLength(settings.suspensionMaxLength), mLateralSlipAngle(decimal(0.0)),
+               mCombinedSlip(decimal(0.0)), mGripScale(decimal(1.0)),
+               mSlidingFraction(decimal(0.0)), mLongitudinalGripShare(decimal(0.0)), mLateralGripShare(decimal(0.0)),
                mAngularVelocity(decimal(0.0)), mRotationAngle(decimal(0.0)) {
 
 }
