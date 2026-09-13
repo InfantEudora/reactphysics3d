@@ -34,7 +34,6 @@
 #include <reactphysics3d/containers/LinkedList.h>
 #include <reactphysics3d/containers/Set.h>
 #include <reactphysics3d/utils/Message.h>
-#include <iostream>
 #include <vector>
 
 // Namespace

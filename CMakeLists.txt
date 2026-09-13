@@ -39,6 +39,7 @@ option(RP3D_PROFILING_ENABLED "Select this if you want to compile for performana
 option(RP3D_GENERATE_DOCUMENTATION "Select this if you want to generate the project documentation" OFF)
 option(RP3D_CODE_COVERAGE_ENABLED "Select this if you need to build for code coverage calculation" OFF)
 option(RP3D_DOUBLE_PRECISION_ENABLED "Select this if you want to compile using double precision floating values" OFF)
+option(RP3D_COMPILE_DEFAULT_LOGGER "Select this if you want to build the built-in DefaultLogger (requires the C++ iostream/locale machinery)" ON)
 
 # Code Coverage
 if(RP3D_CODE_COVERAGE_ENABLED)
@@ -167,7 +168,6 @@ if(RP3D_COMPILE_LIBRARY)
 	    "include/reactphysics3d/utils/Profiler.h"
 	    "include/reactphysics3d/utils/Logger.h"
 	    "include/reactphysics3d/utils/Message.h"
-	    "include/reactphysics3d/utils/DefaultLogger.h"
 	    "include/reactphysics3d/utils/DebugRenderer.h"
 	    "include/reactphysics3d/utils/quickhull/QuickHull.h"
 	    "include/reactphysics3d/utils/quickhull/QHHalfEdgeStructure.h"
@@ -265,11 +265,19 @@ if(RP3D_COMPILE_LIBRARY)
 	    "src/memory/MemoryManager.cpp"
 	    "src/memory/MemoryAllocator.cpp"
 	    "src/utils/Profiler.cpp"
-	    "src/utils/DefaultLogger.cpp"
 	    "src/utils/DebugRenderer.cpp"
 	    "src/utils/quickhull/QuickHull.cpp"
 	    "src/utils/quickhull/QHHalfEdgeStructure.cpp"
 	)
+
+	# The built-in DefaultLogger writes through std::ofstream/std::ostringstream. Those drag the
+	# iostream and locale machinery of the C++ runtime into the final binary (around 800 KB when
+	# statically linked), which is pure overhead for an application that implements the abstract
+	# Logger interface itself. Leaving it out keeps the library free of any stream dependency.
+	if(RP3D_COMPILE_DEFAULT_LOGGER)
+	    list(APPEND REACTPHYSICS3D_HEADERS "include/reactphysics3d/utils/DefaultLogger.h")
+	    list(APPEND REACTPHYSICS3D_SOURCES "src/utils/DefaultLogger.cpp")
+	endif()
 
 	# Create the library
 	add_library(reactphysics3d ${REACTPHYSICS3D_HEADERS} ${REACTPHYSICS3D_SOURCES})
@@ -291,6 +299,9 @@ endif()
 
 # If we need to compile the testbed application
 if(RP3D_COMPILE_TESTBED)
+   if(NOT RP3D_COMPILE_DEFAULT_LOGGER)
+      message(FATAL_ERROR "RP3D_COMPILE_TESTBED requires RP3D_COMPILE_DEFAULT_LOGGER=ON: the testbed logs through DefaultLogger.")
+   endif()
    add_subdirectory(testbed/)
 endif()
 
@@ -312,6 +323,12 @@ endif()
 # Enable double precision if necessary
 if(RP3D_DOUBLE_PRECISION_ENABLED)
     target_compile_definitions(reactphysics3d PUBLIC IS_RP3D_DOUBLE_PRECISION_ENABLED)
+endif()
+
+# Enable the built-in DefaultLogger if necessary. This has to be PUBLIC: the flag changes the
+# declaration of PhysicsCommon, so the library and everything including its headers must agree.
+if(RP3D_COMPILE_DEFAULT_LOGGER)
+    target_compile_definitions(reactphysics3d PUBLIC IS_RP3D_DEFAULT_LOGGER_ENABLED)
 endif()
 
 if(RP3D_COMPILE_LIBRARY)

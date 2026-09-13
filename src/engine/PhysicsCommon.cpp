@@ -45,7 +45,10 @@ PhysicsCommon::PhysicsCommon(MemoryAllocator* baseMemoryAllocator)
                 mConvexMeshShapes(mMemoryManager.getHeapAllocator()), mConcaveMeshShapes(mMemoryManager.getHeapAllocator()),
                 mHeightFieldShapes(mMemoryManager.getHeapAllocator()), mConvexMeshes(mMemoryManager.getHeapAllocator()),
                 mTriangleMeshes(mMemoryManager.getHeapAllocator()), mHeightFields(mMemoryManager.getHeapAllocator()),
-                mProfilers(mMemoryManager.getHeapAllocator()), mDefaultLoggers(mMemoryManager.getHeapAllocator()),
+                mProfilers(mMemoryManager.getHeapAllocator()),
+#ifdef IS_RP3D_DEFAULT_LOGGER_ENABLED
+                mDefaultLoggers(mMemoryManager.getHeapAllocator()),
+#endif
                 mBoxShapeHalfEdgeStructure(mMemoryManager.getHeapAllocator(), 6, 8, 24),
                 mTriangleShapeHalfEdgeStructure(mMemoryManager.getHeapAllocator(), 2, 3, 6) {
 
@@ -193,11 +196,13 @@ void PhysicsCommon::release() {
     }
     mHeightFields.clear();
 
+#ifdef IS_RP3D_DEFAULT_LOGGER_ENABLED
     // Destroy the default loggers
     for (auto it = mDefaultLoggers.begin(); it != mDefaultLoggers.end(); ++it) {
         deleteDefaultLogger(*it);
     }
     mDefaultLoggers.clear();
+#endif
 
 // If profiling is enabled
 #ifdef IS_RP3D_PROFILING_ENABLED
@@ -769,6 +774,8 @@ void PhysicsCommon::deleteHeightField(HeightField* heightField) {
    mMemoryManager.release(MemoryManager::AllocationType::Pool, heightField, sizeof(HeightField));
 }
 
+#ifdef IS_RP3D_DEFAULT_LOGGER_ENABLED
+
 // Create and return a new logger
 /**
  * @return A pointer to the created default logger
@@ -805,6 +812,8 @@ void PhysicsCommon::deleteDefaultLogger(DefaultLogger* logger) {
    // Release allocated memory
    mMemoryManager.release(MemoryManager::AllocationType::Pool, logger, sizeof(DefaultLogger));
 }
+
+#endif
 
 // If profiling is enabled
 #ifdef IS_RP3D_PROFILING_ENABLED

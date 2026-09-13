@@ -27,7 +27,6 @@
 #include <reactphysics3d/collision/shapes/HeightFieldShape.h>
 #include <reactphysics3d/collision/RaycastInfo.h>
 #include <reactphysics3d/utils/Profiler.h>
-#include <iostream>
 
 using namespace reactphysics3d;
 
@@ -96,13 +95,13 @@ bool HeightFieldShape::raycast(const Ray& ray, RaycastInfo& raycastInfo, Collide
 // Return the string representation of the shape
 std::string HeightFieldShape::to_string() const {
 
-    std::stringstream ss;
+    std::string ss;
 
-    ss << "HeightFieldShape{" << std::endl;
+    ss += "HeightFieldShape{\n";
 
-    ss << "scaling=" << mScale.to_string() << std::endl;
-    ss << ", HeightField=" << mHeightField->to_string() << std::endl;
-    ss << "}";
+    ss += "scaling=" + mScale.to_string() + "\n";
+    ss += ", HeightField=" + mHeightField->to_string() + "\n";
+    ss += "}";
 
-    return ss.str();
+    return ss;
 }

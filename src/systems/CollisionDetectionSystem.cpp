@@ -42,7 +42,6 @@
 #include <reactphysics3d/collision/RaycastInfo.h>
 #include <reactphysics3d/containers/Pair.h>
 #include <cassert>
-#include <iostream>
 
 // We want to use the ReactPhysics3D namespace
 using namespace reactphysics3d;

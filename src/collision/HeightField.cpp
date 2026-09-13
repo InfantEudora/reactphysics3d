@@ -29,7 +29,6 @@
 #include <reactphysics3d/collision/shapes/TriangleShape.h>
 #include <reactphysics3d/utils/Profiler.h>
 #include <reactphysics3d/utils/Message.h>
-#include <iostream>
 #include <vector>
 
 using namespace reactphysics3d;
@@ -411,18 +410,18 @@ Vector3 HeightField::getVertexAt(uint32 x, uint32 y) const {
 // Return the string representation of the shape
 std::string HeightField::to_string() const {
 
-    std::stringstream ss;
+    std::string ss;
 
-    ss << "HeightFiel{" << std::endl;
+    ss += "HeightFiel{\n";
 
-    ss << "nbColumns=" << mNbColumns << std::endl;
-    ss << ", nbRows=" << mNbRows << std::endl;
-    ss << ", width=" << mWidth << std::endl;
-    ss << ", length=" << mLength << std::endl;
-    ss << ", minHeight=" << mMinHeight << std::endl;
-    ss << ", maxHeight=" << mMaxHeight << std::endl;
-    ss << ", integerHeightScale=" << mIntegerHeightScale << std::endl;
-    ss << "}";
+    ss += "nbColumns=" + std::to_string(mNbColumns) + "\n";
+    ss += ", nbRows=" + std::to_string(mNbRows) + "\n";
+    ss += ", width=" + std::to_string(mWidth) + "\n";
+    ss += ", length=" + std::to_string(mLength) + "\n";
+    ss += ", minHeight=" + std::to_string(mMinHeight) + "\n";
+    ss += ", maxHeight=" + std::to_string(mMaxHeight) + "\n";
+    ss += ", integerHeightScale=" + std::to_string(mIntegerHeightScale) + "\n";
+    ss += "}";
 
-    return ss.str();
+    return ss;
 }

@@ -45,7 +45,7 @@ findReplaceText("documentation/UserManual/", r'(Version:[\s]+)[\d\.]+', r'\g<1>'
 print("Version number has been updated in documentation/UserManual/title.tex file")        
 
 # Update the RP3D version number in the src/configuration.h file
-findReplaceText("include/reactphysics3d/", r'(RP3D_VERSION[ \t]+=[ \t]+std::string\()"[\d\.]+"', r'\g<1>"' + newVersion + '"', "configuration.h")
+findReplaceText("include/reactphysics3d/", r'(RP3D_VERSION[ \t]+=[ \t]+)"[\d\.]+"', r'\g<1>"' + newVersion + '"', "configuration.h")
 print("Version number has been updated in include/reactphysics3d/configuration.h file")        
 
 # Update the RP3D version number in the src/reactphysics3d.h file

@@ -292,38 +292,38 @@ int32 ConcaveMeshShape::getDynamicAABBTreeNodeDataInt(int32 nodeID) const {
 // Return the string representation of the shape
 std::string ConcaveMeshShape::to_string() const {
 
-    std::stringstream ss;
+    std::string ss;
 
-    ss << "ConcaveMeshShape{" << std::endl;
+    ss += "ConcaveMeshShape{\n";
 
-    ss << "nbVertices=" << getNbVertices() << std::endl;
-    ss << "nbTriangles=" << getNbTriangles() << std::endl;
+    ss += "nbVertices=" + std::to_string(getNbVertices()) + "\n";
+    ss += "nbTriangles=" + std::to_string(getNbTriangles()) + "\n";
 
-    ss << "vertices=[";
+    ss += "vertices=[";
 
     // For each triangle of the concave mesh
     for (uint32 v=0; v<getNbVertices(); v++) {
 
         Vector3 vertex = mTriangleMesh->getVertex(v);
 
-        ss << vertex.to_string() << ", ";
+        ss += vertex.to_string() + ", ";
     }
 
-    ss << "], " << std::endl;
+    ss += "], \n";
 
-    ss << "normals=[";
+    ss += "normals=[";
 
     // For each vertex of the concave mesh
     for (uint32 v=0; v<getNbVertices(); v++) {
 
         Vector3 normal = mScaledVerticesNormals[v];
 
-        ss << normal.to_string() << ", ";
+        ss += normal.to_string() + ", ";
     }
 
-    ss << "], " << std::endl;
+    ss += "], \n";
 
-    ss << "triangles=[";
+    ss += "triangles=[";
 
     // For each triangle of the concave mesh
     // For each triangle of the concave mesh
@@ -333,14 +333,15 @@ std::string ConcaveMeshShape::to_string() const {
 
         mTriangleMesh->getTriangleVerticesIndices(triangleIndex, indices[0], indices[1], indices[2]);
 
-        ss << "(" << indices[0] << "," << indices[1] << "," << indices[2] << "), ";
+        ss += "(" + std::to_string(indices[0]) + "," + std::to_string(indices[1]) + "," +
+              std::to_string(indices[2]) + "), ";
     }
 
-    ss << "], " << std::endl;
+    ss += "], \n";
 
-    ss << "}" << std::endl;
+    ss += "}\n";
 
-    return ss.str();
+    return ss;
 }
 
 #ifdef IS_RP3D_PROFILING_ENABLED

@@ -214,44 +214,44 @@ AABB ConvexMeshShape::getLocalBounds() const {
 // Return the string representation of the shape
 std::string ConvexMeshShape::to_string() const {
 
-    std::stringstream ss;
-    ss << "ConvexMeshShape{" << std::endl;
-    ss << "nbVertices=" << mConvexMesh->getNbVertices() << std::endl;
-    ss << "nbFaces=" << mConvexMesh->getNbFaces() << std::endl;
+    std::string ss;
+    ss += "ConvexMeshShape{\n";
+    ss += "nbVertices=" + std::to_string(mConvexMesh->getNbVertices()) + "\n";
+    ss += "nbFaces=" + std::to_string(mConvexMesh->getNbFaces()) + "\n";
 
-    ss << "vertices=[";
+    ss += "vertices=[";
 
     for (uint32 v=0; v < mConvexMesh->getNbVertices(); v++) {
 
         const Vector3& vertex = mConvexMesh->getVertex(v);
-        ss << vertex.to_string();
+        ss += vertex.to_string();
         if (v != mConvexMesh->getNbVertices() - 1) {
-            ss << ", ";
+            ss += ", ";
         }
     }
 
-    ss << "], faces=[";
+    ss += "], faces=[";
 
     HalfEdgeStructure halfEdgeStruct = mConvexMesh->getHalfEdgeStructure();
     for (uint32 f=0; f < mConvexMesh->getNbFaces(); f++) {
 
         const HalfEdgeStructure::Face& face = halfEdgeStruct.getFace(f);
 
-        ss << "[";
+        ss += "[";
 
         for (uint32 v=0; v < face.faceVertices.size(); v++) {
 
-            ss << face.faceVertices[v];
+            ss += std::to_string(face.faceVertices[v]);
             if (v != face.faceVertices.size() - 1) {
-               ss << ",";
+               ss += ",";
             }
         }
 
-        ss << "]";
+        ss += "]";
     }
 
-    ss << "]}";
+    ss += "]}";
 
-    return ss.str();
+    return ss;
 }
 

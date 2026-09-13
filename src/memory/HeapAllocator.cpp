@@ -28,7 +28,6 @@
 #include <reactphysics3d/memory/MemoryManager.h>
 #include <cstdlib>
 #include <cassert>
-#include <iostream>
 
 using namespace reactphysics3d;
 

@@ -38,7 +38,6 @@
 #include <reactphysics3d/engine/Island.h>
 #include <reactphysics3d/collision/ContactManifold.h>
 #include <reactphysics3d/containers/Stack.h>
-#include <iostream>
 
 // Namespaces
 using namespace reactphysics3d;
@@ -84,14 +83,11 @@ PhysicsWorld::PhysicsWorld(MemoryManager& memoryManager, PhysicsCommon& physicsC
     // Automatically generate a name for the world
     if (mName == "") {
 
-        std::stringstream ss;
-        ss << "world";
+        mName = "world";
 
         if (mNbWorlds > 0) {
-            ss << mNbWorlds;
+            mName += std::to_string(mNbWorlds);
         }
-
-        mName = ss.str();
     }
 
 #ifdef IS_RP3D_PROFILING_ENABLED
