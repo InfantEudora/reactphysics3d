@@ -304,6 +304,7 @@ Vector3 HingeJoint::getReactionTorque(decimal timeStep) const {
     return sizeof(HingeJoint);
 }
 
+#ifdef IS_RP3D_DEBUG_STRINGS_ENABLED
 // Return a string representation
 std::string HingeJoint::to_string() const {
     return "HingeJoint{ lowerLimit=" + std::to_string(mWorld.mHingeJointsComponents.getLowerLimit(mEntity)) +
@@ -318,3 +319,4 @@ std::string HingeJoint::to_string() const {
             (mWorld.mHingeJointsComponents.getIsLimitEnabled(mEntity) ? "true" : "false") + ", isMotorEnabled=" +
             (mWorld.mHingeJointsComponents.getIsMotorEnabled(mEntity) ? "true" : "false") + "}";
 }
+#endif

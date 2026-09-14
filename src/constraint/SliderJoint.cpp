@@ -326,6 +326,7 @@ Vector3 SliderJoint::getReactionTorque(decimal timeStep) const {
     return mWorld.mSliderJointsComponents.getImpulseRotation(mEntity) / timeStep;
 }
 
+#ifdef IS_RP3D_DEBUG_STRINGS_ENABLED
 // Return a string representation
 std::string SliderJoint::to_string() const {
     return "SliderJoint{ lowerLimit=" + std::to_string(mWorld.mSliderJointsComponents.getLowerLimit(mEntity)) + ", upperLimit=" + std::to_string(mWorld.mSliderJointsComponents.getUpperLimit(mEntity)) +
@@ -336,3 +337,4 @@ std::string SliderJoint::to_string() const {
             ", maxMotorForce=" + std::to_string(getMaxMotorForce()) + ", isLimitEnabled=" +
             (mWorld.mSliderJointsComponents.getIsLimitEnabled(mEntity) ? "true" : "false") + ", isMotorEnabled=" + (mWorld.mSliderJointsComponents.getIsMotorEnabled(mEntity) ? "true" : "false") + "}";
 }
+#endif

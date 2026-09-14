@@ -140,6 +140,7 @@ class PhysicsWorld {
 
             ~WorldSettings() = default;
 
+#ifdef IS_RP3D_DEBUG_STRINGS_ENABLED
             /// Return a string with the world settings
             std::string to_string() const {
 
@@ -161,6 +162,7 @@ class PhysicsWorld {
 
                 return ss;
             }
+#endif
         };
 
     protected :

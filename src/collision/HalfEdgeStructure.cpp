@@ -129,6 +129,7 @@ void HalfEdgeStructure::reserve(uint32 facesCapacity, uint32 verticesCapacity, u
 
 }
 
+#ifdef IS_RP3D_DEBUG_STRINGS_ENABLED
 // Return a string representation of the half-edge structure
 std::string HalfEdgeStructure::to_string() const {
 
@@ -187,3 +188,4 @@ std::string HalfEdgeStructure::to_string() const {
     }
     return "HalfEdgeStructure(" + faces + ",\n"  + edges + ",\n" + vertices + ")";
 }
+#endif

@@ -287,7 +287,17 @@ RP3D_FORCE_INLINE void PhysicsCommon::setLogger(Logger* logger) {
 }
 
 // Use this macro to log something
+#ifdef IS_RP3D_DEBUG_STRINGS_ENABLED
+
 #define RP3D_LOG(physicsWorldName, level, category, message, filename, lineNumber) if (reactphysics3d::PhysicsCommon::getLogger() != nullptr) PhysicsCommon::getLogger()->log(level, physicsWorldName, category, message, filename, lineNumber)
+
+#else
+
+// The log messages are built by concatenating std::string, so a disabled log call has to discard
+// its arguments unevaluated: the point is that the concatenation code is never generated.
+#define RP3D_LOG(physicsWorldName, level, category, message, filename, lineNumber) ((void)0)
+
+#endif
 
 }
 

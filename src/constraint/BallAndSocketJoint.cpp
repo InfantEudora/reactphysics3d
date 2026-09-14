@@ -154,10 +154,12 @@ Vector3 BallAndSocketJoint::getReactionTorque(decimal timeStep) const {
     return Vector3(0, 0, 0);
 }
 
+#ifdef IS_RP3D_DEBUG_STRINGS_ENABLED
 // Return a string representation
 std::string BallAndSocketJoint::to_string() const {
 
     return "BallAndSocketJoint{ localAnchorPointBody1=" + mWorld.mBallAndSocketJointsComponents.getLocalAnchorPointBody1(mEntity).to_string() +
             ", localAnchorPointBody2=" + mWorld.mBallAndSocketJointsComponents.getLocalAnchorPointBody2(mEntity).to_string() + "}";
 }
+#endif
 

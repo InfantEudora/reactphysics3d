@@ -40,6 +40,14 @@ option(RP3D_GENERATE_DOCUMENTATION "Select this if you want to generate the proj
 option(RP3D_CODE_COVERAGE_ENABLED "Select this if you need to build for code coverage calculation" OFF)
 option(RP3D_DOUBLE_PRECISION_ENABLED "Select this if you want to compile using double precision floating values" OFF)
 option(RP3D_COMPILE_DEFAULT_LOGGER "Select this if you want to build the built-in DefaultLogger (requires the C++ iostream/locale machinery)" ON)
+option(RP3D_COMPILE_DEBUG_STRINGS "Select this if you want the library to be able to produce text: the to_string() methods and the internal log messages" ON)
+
+# Without the debug strings there is nothing left to log, so the built-in logger goes with them.
+# This is what makes the library free of <sstream>/<iostream>: turning the strings off is enough.
+if(NOT RP3D_COMPILE_DEBUG_STRINGS AND RP3D_COMPILE_DEFAULT_LOGGER)
+    message(STATUS "RP3D_COMPILE_DEBUG_STRINGS is OFF: forcing RP3D_COMPILE_DEFAULT_LOGGER to OFF as well")
+    set(RP3D_COMPILE_DEFAULT_LOGGER OFF CACHE BOOL "Select this if you want to build the built-in DefaultLogger (requires the C++ iostream/locale machinery)" FORCE)
+endif()
 
 # Code Coverage
 if(RP3D_CODE_COVERAGE_ENABLED)
@@ -299,6 +307,9 @@ endif()
 
 # If we need to compile the testbed application
 if(RP3D_COMPILE_TESTBED)
+   if(NOT RP3D_COMPILE_DEBUG_STRINGS)
+      message(FATAL_ERROR "RP3D_COMPILE_TESTBED requires RP3D_COMPILE_DEBUG_STRINGS=ON: the testbed logs through DefaultLogger, which the debug strings pull in.")
+   endif()
    if(NOT RP3D_COMPILE_DEFAULT_LOGGER)
       message(FATAL_ERROR "RP3D_COMPILE_TESTBED requires RP3D_COMPILE_DEFAULT_LOGGER=ON: the testbed logs through DefaultLogger.")
    endif()
@@ -329,6 +340,13 @@ endif()
 # declaration of PhysicsCommon, so the library and everything including its headers must agree.
 if(RP3D_COMPILE_DEFAULT_LOGGER)
     target_compile_definitions(reactphysics3d PUBLIC IS_RP3D_DEFAULT_LOGGER_ENABLED)
+endif()
+
+# Enable the debug strings if necessary. Also PUBLIC, and for a stronger reason than the logger
+# flag: it adds or removes a pure virtual to_string() on CollisionShape and Joint, so it changes
+# the vtable layout of every shape and joint. The library and its users must agree.
+if(RP3D_COMPILE_DEBUG_STRINGS)
+    target_compile_definitions(reactphysics3d PUBLIC IS_RP3D_DEBUG_STRINGS_ENABLED)
 endif()
 
 if(RP3D_COMPILE_LIBRARY)

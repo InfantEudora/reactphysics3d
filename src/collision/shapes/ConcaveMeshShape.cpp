@@ -289,6 +289,7 @@ int32 ConcaveMeshShape::getDynamicAABBTreeNodeDataInt(int32 nodeID) const {
    return mTriangleMesh->getDynamicAABBTreeNodeDataInt(nodeID);
 }
 
+#ifdef IS_RP3D_DEBUG_STRINGS_ENABLED
 // Return the string representation of the shape
 std::string ConcaveMeshShape::to_string() const {
 
@@ -343,6 +344,7 @@ std::string ConcaveMeshShape::to_string() const {
 
     return ss;
 }
+#endif
 
 #ifdef IS_RP3D_PROFILING_ENABLED
 

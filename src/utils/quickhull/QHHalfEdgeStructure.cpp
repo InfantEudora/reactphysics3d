@@ -379,6 +379,7 @@ bool QHHalfEdgeStructure::isValid() const {
     return isValid;
 }
 
+#ifdef IS_RP3D_DEBUG_STRINGS_ENABLED
 // Return a string representation of the half-edge structure
 std::string QHHalfEdgeStructure::to_string() const {
 
@@ -417,3 +418,4 @@ std::string QHHalfEdgeStructure::to_string() const {
     }
     return "HalfEdgeStructure(" + faces + ",\n"  + edges + ",\n" + vertices + ")";
 }
+#endif

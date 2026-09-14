@@ -211,6 +211,7 @@ AABB ConvexMeshShape::getLocalBounds() const {
     return aabb;
 }
 
+#ifdef IS_RP3D_DEBUG_STRINGS_ENABLED
 // Return the string representation of the shape
 std::string ConvexMeshShape::to_string() const {
 
@@ -254,4 +255,5 @@ std::string ConvexMeshShape::to_string() const {
 
     return ss;
 }
+#endif
 

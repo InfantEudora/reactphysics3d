@@ -92,6 +92,7 @@ bool HeightFieldShape::raycast(const Ray& ray, RaycastInfo& raycastInfo, Collide
     return false;
 }
 
+#ifdef IS_RP3D_DEBUG_STRINGS_ENABLED
 // Return the string representation of the shape
 std::string HeightFieldShape::to_string() const {
 
@@ -105,3 +106,4 @@ std::string HeightFieldShape::to_string() const {
 
     return ss;
 }
+#endif

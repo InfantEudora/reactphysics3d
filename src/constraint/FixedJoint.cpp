@@ -89,6 +89,7 @@ Vector3 FixedJoint::getReactionTorque(decimal timeStep) const {
     return mWorld.mFixedJointsComponents.getImpulseRotation(mEntity) / timeStep;
 }
 
+#ifdef IS_RP3D_DEBUG_STRINGS_ENABLED
 // Return a string representation
 std::string FixedJoint::to_string() const {
     return "FixedJoint{ localAnchorPointBody1=" + mWorld.mFixedJointsComponents.getLocalAnchorPointBody1(mEntity).to_string() +
@@ -96,4 +97,5 @@ std::string FixedJoint::to_string() const {
                         ", initOrientationDifferenceInv=" + mWorld.mFixedJointsComponents.getInitOrientationDifferenceInv(mEntity).to_string() +
                         "}";
 }
+#endif
 

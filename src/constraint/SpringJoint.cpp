@@ -153,6 +153,7 @@ Vector3 SpringJoint::getReactionTorque(decimal /*timeStep*/) const {
     return Vector3(0, 0, 0);
 }
 
+#ifdef IS_RP3D_DEBUG_STRINGS_ENABLED
 // Return a string representation
 std::string SpringJoint::to_string() const {
     const SpringSettings& spring = getSpringSettings();
@@ -163,3 +164,4 @@ std::string SpringJoint::to_string() const {
            ", frequencyOrStiffness=" + std::to_string(spring.frequencyOrStiffness) +
            ", damping=" + std::to_string(spring.damping) + "}";
 }
+#endif

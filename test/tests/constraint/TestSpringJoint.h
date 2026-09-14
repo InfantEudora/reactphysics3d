@@ -134,7 +134,9 @@ class TestSpringJoint : public Test {
             rp3d_test(Vector3::approxEqual(mJoint->getLocalAnchorPointBody1(), Vector3(0, 0, 0), decimal(1e-5)));
             rp3d_test(Vector3::approxEqual(mJoint->getLocalAnchorPointBody2(), Vector3(0, 0, 0), decimal(1e-5)));
             rp3d_test(mJoint->getSpringSettings().mode == SpringMode::STIFFNESS_AND_DAMPING);
+#ifdef IS_RP3D_DEBUG_STRINGS_ENABLED
             rp3d_test(!mJoint->to_string().empty());
+#endif
 
             destroyScene();
         }

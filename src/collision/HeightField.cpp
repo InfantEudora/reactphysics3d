@@ -407,6 +407,7 @@ Vector3 HeightField::getVertexAt(uint32 x, uint32 y) const {
     return vertex;
 }
 
+#ifdef IS_RP3D_DEBUG_STRINGS_ENABLED
 // Return the string representation of the shape
 std::string HeightField::to_string() const {
 
@@ -425,3 +426,4 @@ std::string HeightField::to_string() const {
 
     return ss;
 }
+#endif
