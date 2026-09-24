@@ -122,7 +122,11 @@ bool ConvexMeshShape::raycast(const Ray& ray, RaycastInfo& raycastInfo, Collider
         const HalfEdgeStructure::Face& face = halfEdgeStructure.getFace(f);
         const Vector3& faceNormal = getFaceNormal(f);
         const HalfEdgeStructure::Vertex& faceVertex = halfEdgeStructure.getVertex(face.faceVertices[0]);
-        const Vector3& facePoint = mConvexMesh->getVertex(faceVertex.vertexPointIndex);
+        // (local fix) The SCALED vertex, to match the scaled normal above. Unscaled, every face plane
+        // sat where the unit mesh's would, so a scaled shape was raycast at its unscaled size - a
+        // board scaled to radius 0.57 caught rays at radius 1, and a ray starting inside that
+        // phantom (but outside the real shape) reported nothing at all.
+        const Vector3 facePoint = mConvexMesh->getVertex(faceVertex.vertexPointIndex) * mScale;
         decimal denom = faceNormal.dot(direction);
         decimal planeD = faceNormal.dot(facePoint);
         decimal dist = planeD -  faceNormal.dot(ray.point1);
@@ -192,7 +196,8 @@ bool ConvexMeshShape::testPointInside(const Vector3& localPoint, Collider* /*col
         const HalfEdgeStructure::Face& face = halfEdgeStructure.getFace(f);
         const Vector3& faceNormal = getFaceNormal(f);
         const HalfEdgeStructure::Vertex& faceVertex = halfEdgeStructure.getVertex(face.faceVertices[0]);
-        const Vector3& facePoint = mConvexMesh->getVertex(faceVertex.vertexPointIndex);
+        // (local fix) Scaled, for the same reason as in raycast() above.
+        const Vector3 facePoint = mConvexMesh->getVertex(faceVertex.vertexPointIndex) * mScale;
 
         // If the point is out of the face plane, it is outside of the convex mesh
         if (computePointToPlaneDistance(localPoint, faceNormal, facePoint) > decimal(0.0)) return false;
