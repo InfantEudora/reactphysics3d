@@ -109,6 +109,18 @@ void BroadPhaseSystem::removeCollider(Collider* collider) {
     removeMovedCollider(broadPhaseID);
 }
 
+// (local fix) Return the empty broad-phase to its freshly constructed state
+void BroadPhaseSystem::resetToFresh() {
+
+    assert(mMovedShapes.size() == 0);
+
+    // Node ids come off a LIFO free list, so a tree emptied by removals hands them out in the
+    // reverse of the order they were freed. A reset tree hands them out from 0, as a new one does.
+    mDynamicAABBTree.reset();
+
+    mMovedShapes.clear(true);
+}
+
 // Update the broad-phase state of a single collider
 void BroadPhaseSystem::updateCollider(Entity colliderEntity) {
 

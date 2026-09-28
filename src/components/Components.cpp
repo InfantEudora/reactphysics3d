@@ -192,3 +192,28 @@ void Components::setIsEntityDisabled(Entity entity, bool isDisabled) {
     assert(mDisabledStartIndex <= mNbComponents);
     assert(mNbComponents == static_cast<uint32>(mMapEntityToComponentIndex.size()));
 }
+
+// (local fix) Put the components in the order of `entities`, enabled group first.
+// Each swap puts the right component at position i and never crosses the enabled/disabled boundary:
+// the target for slot i is enabled exactly when i < mDisabledStartIndex, and so is its current slot.
+void Components::setEntitiesOrder(const Array<Entity>& entities) {
+
+    assert(entities.size() == mNbComponents);
+
+    Array<Entity> target(mMemoryAllocator, mNbComponents);
+    for (uint32 pass = 0; pass < 2; pass++) {
+        const bool wantDisabled = pass == 1;
+        for (uint32 i = 0; i < entities.size(); i++) {
+            const bool isDisabled = mMapEntityToComponentIndex[entities[i]] >= mDisabledStartIndex;
+            if (isDisabled == wantDisabled) target.add(entities[i]);
+        }
+    }
+    assert(target.size() == mNbComponents);
+
+    for (uint32 i = 0; i < mNbComponents; i++) {
+        const uint32 current = mMapEntityToComponentIndex[target[i]];
+        if (current != i) {
+            swapComponents(i, current);
+        }
+    }
+}

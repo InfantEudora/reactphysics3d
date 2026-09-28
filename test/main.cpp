@@ -48,6 +48,7 @@
 #include "tests/containers/TestDeque.h"
 #include "tests/containers/TestStack.h"
 #include "tests/engine/TestRigidBody.h"
+#include "tests/engine/TestWorldDeterminism.h"
 #include "tests/constraint/TestAxisConstraintPart.h"
 #include "tests/constraint/TestSpringJoint.h"
 #include "tests/constraint/TestVehicleConstraint.h"
@@ -99,6 +100,7 @@ int main() {
     // ---------- Engine tests ---------- //
 
     testSuite.addTest(new TestRigidBody("RigidBody"));
+    testSuite.addTest(new TestWorldDeterminism("WorldDeterminism"));
     testSuite.addTest(new TestDynamicSystem("Motion Integration"));
 
     // ---------- Constraint tests ---------- //

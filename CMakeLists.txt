@@ -242,6 +242,7 @@ if(RP3D_COMPILE_LIBRARY)
 	    "src/systems/SolveVehicleSystem.cpp"
 	    "src/systems/SolveUprightConstraintSystem.cpp"
 	    "src/engine/PhysicsWorld.cpp"
+	    "src/engine/PhysicsWorldState.cpp"
 	    "src/engine/Island.cpp"
 	    "src/engine/Material.cpp"
 	    "src/engine/OverlappingPairs.cpp"

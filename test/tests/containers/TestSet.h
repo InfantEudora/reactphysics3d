@@ -85,12 +85,36 @@ class TestSet : public Test {
             testConstructors();
             testReserve();
             testAddRemoveClear();
+            testClearReleaseMemoryThenAdd();
             testContains();
             testFind();
             testEquality();
             testAssignment();
             testIterators();
             testConverters();
+        }
+
+        /// (local fix) clear(true) releases the arrays; the next add() must allocate new ones.
+        /// It used to leave the free list pointing into the released arrays, so add() took a
+        /// "free" entry instead of allocating and wrote through a null array.
+        void testClearReleaseMemoryThenAdd() {
+
+            Set<int> set(mAllocator);
+            for (int i = 0; i < 40; i++) set.add(i);
+            set.clear(true);
+            rp3d_test(set.size() == 0);
+            rp3d_test(set.capacity() == 0);
+
+            for (int i = 0; i < 40; i++) set.add(i);
+            rp3d_test(set.size() == 40);
+            bool allThere = true;
+            for (int i = 0; i < 40; i++) allThere = allThere && set.contains(i);
+            rp3d_test(allThere);
+
+            // and twice over, to cover a clear(true) of a set that was itself refilled
+            set.clear(true);
+            set.add(7);
+            rp3d_test(set.size() == 1);
         }
 
         void testConstructors() {

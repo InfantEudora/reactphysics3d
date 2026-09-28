@@ -85,12 +85,36 @@ class TestMap : public Test {
             testConstructors();
             testReserve();
             testAddRemoveClear();
+            testClearReleaseMemoryThenAdd();
             testContainsKey();
             testFind();
             testIndexing();
             testEquality();
             testAssignment();
             testIterators();
+        }
+
+        /// (local fix) clear(true) releases the arrays; the next add() must allocate new ones.
+        /// It used to leave the free list pointing into the released arrays, so add() took a
+        /// "free" entry instead of allocating and wrote through a null array.
+        void testClearReleaseMemoryThenAdd() {
+
+            Map<int, int> map(mAllocator);
+            for (int i = 0; i < 40; i++) map.add(Pair<int, int>(i, 10 * i));
+            map.clear(true);
+            rp3d_test(map.size() == 0);
+            rp3d_test(map.capacity() == 0);
+
+            for (int i = 0; i < 40; i++) map.add(Pair<int, int>(i, 10 * i));
+            rp3d_test(map.size() == 40);
+            bool allThere = true;
+            for (int i = 0; i < 40; i++) allThere = allThere && map[i] == 10 * i;
+            rp3d_test(allThere);
+
+            // and twice over, to cover a clear(true) of a set that was itself refilled
+            map.clear(true);
+            map.add(Pair<int, int>(7, 70));
+            rp3d_test(map.size() == 1);
         }
 
         void testConstructors() {
